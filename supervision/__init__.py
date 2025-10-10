@@ -6,6 +6,7 @@ try:
 except importlib_metadata.PackageNotFoundError:
     __version__ = "development"
 
+from supervision.annotators.advanced import AdvancedAnnotator
 from supervision.annotators.core import (
     BackgroundOverlayAnnotator,
     BlurAnnotator,
@@ -116,6 +117,11 @@ from supervision.key_points.annotators import (
 from supervision.key_points.core import KeyPoints
 from supervision.metrics.detection import ConfusionMatrix, MeanAveragePrecision
 from supervision.tracker.byte_tracker.core import ByteTrack
+from supervision.utils.capture import (
+    FileVideoCapture,
+    StreamCapture,
+    WebcamVideoCapture,
+)
 from supervision.utils.conversion import cv2_to_pillow, pillow_to_cv2
 from supervision.utils.file import list_files_with_extensions
 from supervision.utils.image import (
@@ -162,6 +168,7 @@ __all__ = [
     "DotAnnotator",
     "EdgeAnnotator",
     "EllipseAnnotator",
+    "FileVideoCapture",
     "FPSMonitor",
     "HaloAnnotator",
     "HeatMapAnnotator",
@@ -189,12 +196,14 @@ __all__ = [
     "Rect",
     "RichLabelAnnotator",
     "RoundBoxAnnotator",
+    "StreamCapture",
     "TraceAnnotator",
     "TriangleAnnotator",
     "VertexAnnotator",
     "VertexLabelAnnotator",
     "VideoInfo",
     "VideoSink",
+    "WebcamVideoCapture",
     "approximate_polygon",
     "box_iou",
     "box_iou_batch",
