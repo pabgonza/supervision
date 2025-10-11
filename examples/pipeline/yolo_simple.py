@@ -20,8 +20,12 @@ box_annotator = sv.BoxAnnotator()
 label_annotator = sv.LabelAnnotator()
 
 # Build detection pipeline
+
+#source = sv.Pipeline(sv.StreamSource(stream_url='rtsp://192.168.18.169:554/live1s3.sdp'))
+source = sv.Pipeline(sv.WebcamSource(camera_id=0))
+
 pipeline = (
-    sv.Pipeline(sv.WebcamSource(camera_id=0, width=640, height=480))
+    source
     | sv.FPSCalculatorStep()
     | sv.YOLODetectionStep("yolov8n.pt", conf=0.5, device="cuda")
     | sv.AnnotationStep([box_annotator, label_annotator])
