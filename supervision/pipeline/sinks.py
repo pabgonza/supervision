@@ -33,6 +33,7 @@ class DisplaySink(PipelineSink):
         window_name: str = "Pipeline",
         show_fps: bool = False,
         wait_key: int = 1,
+        window_mode: int = cv2.WINDOW_AUTOSIZE,
     ):
         """
         Initialize display sink.
@@ -41,13 +42,15 @@ class DisplaySink(PipelineSink):
             window_name: Name of the display window
             show_fps: Whether to show FPS on the frame
             wait_key: Delay in milliseconds for cv2.waitKey (1 = real-time)
+            window_mode: Window mode (cv2.WINDOW_AUTOSIZE or cv2.WINDOW_NORMAL)
         """
         self.window_name = window_name
         self.show_fps = show_fps
         self.wait_key = wait_key
+        self.window_mode = window_mode
         self.stopped = False
 
-        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
+        cv2.namedWindow(self.window_name, self.window_mode)
 
     def consume(self, data: dict[str, Any]) -> bool | None:
         """
