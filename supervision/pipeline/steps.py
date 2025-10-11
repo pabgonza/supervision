@@ -395,3 +395,88 @@ class CallbackStep:
     def filter(self, data: dict[str, Any]) -> bool:
         """Always process."""
         return True
+
+
+class YOLODetectionStep:
+    """
+    Pipeline step for YOLO object detection using Ultralytics.
+
+    Runs YOLO inference on frames and converts results to supervision Detections.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt", conf=0.5)
+            | sv.AnnotationStep(sv.BoxAnnotator())
+            | sv.DisplaySink("Detections")
+        )
+        pipeline.run()
+        ```
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.25,
+        iou: float = 0.45,
+        device: str = "cuda",
+        verbose: bool = False,
+    ):
+        """
+        Initialize YOLO detection step.
+
+        Args:
+            model_path: Path to YOLO model file (.pt)
+            conf: Confidence threshold for detections
+            iou: IOU threshold for NMS
+            device: Device for inference ('cuda' or 'cpu')
+            verbose: Whether to print verbose output
+        """
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError(
+                "ultralytics is required for YOLODetectionStep. "
+                "Install it with: pip install ultralytics"
+            )
+
+        self.model_path = model_path
+        self.conf = conf
+        self.iou = iou
+        self.device = device
+        self.verbose = verbose
+
+        # Load model
+        self.model = YOLO(model_path)
+        self.model.to(device)
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Run YOLO inference on frame.
+
+        Args:
+            data: Pipeline data containing 'frame'
+
+        Returns:
+            Data with 'detections' field added
+        """
+        frame = data.get("frame")
+        if frame is None:
+            return data
+
+        # Run inference
+        results = self.model.predict(
+            source=frame, conf=self.conf, iou=self.iou, verbose=self.verbose
+        )
+
+        # Convert to supervision Detections
+        data["detections"] = Detections.from_ultralytics(results[0])
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data

@@ -24,6 +24,7 @@ from supervision.pipeline.steps import (
     FPSCalculatorStep,
     ResizeStep,
     TransformStep,
+    YOLODetectionStep,
 )
 
 __all__ = [
@@ -50,4 +51,5 @@ __all__ = [
     # Sources
     "VideoFileSource",
     "WebcamSource",
+    "YOLODetectionStep",
 ]

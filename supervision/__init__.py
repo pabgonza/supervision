@@ -136,6 +136,7 @@ from supervision.pipeline import (
     VideoFileSink,
     VideoFileSource,
     WebcamSource,
+    YOLODetectionStep,
 )
 from supervision.tracker.byte_tracker.core import ByteTrack
 from supervision.utils.capture import (
@@ -165,9 +166,9 @@ from supervision.utils.video import (
 )
 
 __all__ = [
+    "LMM",
     "AdvancedAnnotator",
     "AnnotationStep",
-    "LMM",
     "BackgroundOverlayAnnotator",
     "BaseDataset",
     "BlurAnnotator",
@@ -195,10 +196,10 @@ __all__ = [
     "DotAnnotator",
     "EdgeAnnotator",
     "EllipseAnnotator",
-    "FileVideoCapture",
-    "FilterStep",
     "FPSCalculatorStep",
     "FPSMonitor",
+    "FileVideoCapture",
+    "FilterStep",
     "FrameGeneratorSource",
     "HaloAnnotator",
     "HeatMapAnnotator",
@@ -218,11 +219,11 @@ __all__ = [
     "OverlapFilter",
     "OverlapMetric",
     "PercentageBarAnnotator",
-    "PixelateAnnotator",
     "Pipeline",
     "PipelineSink",
     "PipelineSource",
     "PipelineStep",
+    "PixelateAnnotator",
     "Point",
     "PolygonAnnotator",
     "PolygonZone",
@@ -245,6 +246,7 @@ __all__ = [
     "VideoSink",
     "WebcamSource",
     "WebcamVideoCapture",
+    "YOLODetectionStep",
     "approximate_polygon",
     "box_iou",
     "box_iou_batch",
