@@ -118,6 +118,7 @@ from supervision.key_points.core import KeyPoints
 from supervision.metrics.detection import ConfusionMatrix, MeanAveragePrecision
 from supervision.pipeline import (
     AnnotationStep,
+    ByteTrackerStep,
     CallbackSink,
     CallbackStep,
     DetectionFilterStep,
@@ -175,6 +176,7 @@ __all__ = [
     "BoxAnnotator",
     "BoxCornerAnnotator",
     "ByteTrack",
+    "ByteTrackerStep",
     "CSVSink",
     "CallbackSink",
     "CallbackStep",
