@@ -4,8 +4,14 @@ from typing import Any, Callable
 
 import numpy as np
 
-from supervision.annotators.core import BaseAnnotator
+from supervision.annotators.core import (
+    BaseAnnotator,
+    BoxAnnotator,
+    LabelAnnotator,
+    TraceAnnotator,
+)
 from supervision.detection.core import Detections
+from supervision.draw.color import Color, ColorPalette
 from supervision.utils.image import resize_image
 from supervision.utils.video import FPSMonitor
 
@@ -601,3 +607,415 @@ class ByteTrackerStep:
         to restart tracking from scratch.
         """
         self.tracker.reset()
+
+
+class BoxAnnotatorStep:
+    """
+    Pipeline step for drawing bounding boxes using BoxAnnotator.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Boxes")
+        )
+        pipeline.run()
+        ```
+    """
+
+    def __init__(
+        self,
+        thickness: int = 2,
+        color: Any = None,
+        detections_key: str = "detections",
+        output_key: str = "frame",
+        copy_frame: bool = True,
+    ):
+        """
+        Initialize BoxAnnotator step.
+
+        Args:
+            thickness: Thickness of bounding box lines
+            color: Color or ColorPalette for boxes
+            detections_key: Key in data dict containing Detections
+            output_key: Key to store annotated frame
+            copy_frame: Whether to copy frame before annotating (default: True)
+        """
+        if color is None:
+            color = ColorPalette.DEFAULT
+
+        self.box_annotator = BoxAnnotator(color=color, thickness=thickness)
+        self.detections_key = detections_key
+        self.output_key = output_key
+        self.copy_frame = copy_frame
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Draw bounding boxes on frame."""
+        frame = data.get("frame")
+        detections = data.get(self.detections_key)
+
+        if frame is None:
+            return data
+
+        # Copy frame if requested and modifying original
+        if self.copy_frame and self.output_key == "frame":
+            annotated_frame = frame.copy()
+        else:
+            annotated_frame = frame
+
+        if detections is not None and isinstance(detections, Detections):
+            annotated_frame = self.box_annotator.annotate(
+                scene=annotated_frame, detections=detections
+            )
+
+        data[self.output_key] = annotated_frame
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data
+
+
+class LabelAnnotatorStep:
+    """
+    Pipeline step for drawing labels using LabelAnnotator.
+
+    Reads labels from data dictionary and draws them on detections.
+    Use with LabelFormatterStep to generate labels automatically.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | yolo_step
+            | sv.LabelFormatterStep(class_names=yolo_step.model.names)
+            | sv.LabelAnnotatorStep()
+            | sv.DisplaySink("Labels")
+        )
+        pipeline.run()
+        ```
+    """
+
+    def __init__(
+        self,
+        text_color: Any = None,
+        text_scale: float = 0.5,
+        text_thickness: int = 1,
+        text_padding: int = 10,
+        color: Any = None,
+        detections_key: str = "detections",
+        labels_key: str = "labels",
+        output_key: str = "frame",
+        copy_frame: bool = True,
+    ):
+        """
+        Initialize LabelAnnotator step.
+
+        Args:
+            text_color: Color for text
+            text_scale: Scale of text
+            text_thickness: Thickness of text
+            text_padding: Padding around text
+            color: Color or ColorPalette for label background
+            detections_key: Key in data dict containing Detections
+            labels_key: Key in data dict containing labels list
+            output_key: Key to store annotated frame
+            copy_frame: Whether to copy frame before annotating (default: True)
+        """
+        if text_color is None:
+            text_color = Color.BLACK
+
+        if color is None:
+            color = ColorPalette.DEFAULT
+
+        self.label_annotator = LabelAnnotator(
+            text_color=text_color,
+            text_scale=text_scale,
+            text_thickness=text_thickness,
+            text_padding=text_padding,
+            color=color,
+        )
+        self.detections_key = detections_key
+        self.labels_key = labels_key
+        self.output_key = output_key
+        self.copy_frame = copy_frame
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Draw labels on frame."""
+        frame = data.get("frame")
+        detections = data.get(self.detections_key)
+        labels = data.get(self.labels_key)
+
+        if frame is None:
+            return data
+
+        # Copy frame if requested and modifying original
+        if self.copy_frame and self.output_key == "frame":
+            annotated_frame = frame.copy()
+        else:
+            annotated_frame = frame
+
+        if (
+            detections is not None
+            and isinstance(detections, Detections)
+            and labels is not None
+        ):
+            annotated_frame = self.label_annotator.annotate(
+                scene=annotated_frame, detections=detections, labels=labels
+            )
+
+        data[self.output_key] = annotated_frame
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data
+
+
+class LabelFormatterStep:
+    """
+    Pipeline step to automatically generate labels for detections.
+
+    Creates formatted labels from detection information including tracker ID,
+    class name, and confidence score. The generated labels are stored in the
+    data dictionary under the 'labels' key for use by AnnotationStep.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | yolo_step
+            | sv.ByteTrackerStep()
+            | sv.LabelFormatterStep(class_names=yolo_step.model.names)
+            | sv.AnnotationStep(sv.LabelAnnotator())
+            | sv.DisplaySink("Labeled Detections")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom label format
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | yolo_step
+            | sv.LabelFormatterStep(
+                class_names=yolo_step.model.names,
+                show_tracker_id=True,
+                show_confidence=True,
+                confidence_decimals=3
+            )
+            | sv.AnnotationStep(sv.LabelAnnotator())
+            | sv.DisplaySink("Formatted Labels")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        class_names: dict[int, str] | None = None,
+        show_tracker_id: bool = True,
+        show_class: bool = True,
+        show_confidence: bool = True,
+        confidence_decimals: int = 2,
+        detections_key: str = "detections",
+        labels_key: str = "labels",
+    ):
+        """
+        Initialize label formatter step.
+
+        Args:
+            class_names: Dictionary mapping class IDs to class names.
+                If None, class IDs will be used instead of names.
+            show_tracker_id: Whether to include tracker ID in labels
+            show_class: Whether to include class name/ID in labels
+            show_confidence: Whether to include confidence score in labels
+            confidence_decimals: Number of decimal places for confidence
+            detections_key: Key in data dict containing Detections object
+            labels_key: Key to store generated labels in data dict
+        """
+        self.class_names = class_names
+        self.show_tracker_id = show_tracker_id
+        self.show_class = show_class
+        self.show_confidence = show_confidence
+        self.confidence_decimals = confidence_decimals
+        self.detections_key = detections_key
+        self.labels_key = labels_key
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Generate labels from detections.
+
+        Args:
+            data: Pipeline data containing detections
+
+        Returns:
+            Data with generated labels added
+        """
+        detections = data.get(self.detections_key)
+
+        if detections is None or len(detections) == 0:
+            data[self.labels_key] = []
+            return data
+
+        labels = []
+        for i in range(len(detections)):
+            label_parts = []
+
+            # Add tracker ID
+            if self.show_tracker_id and detections.tracker_id is not None:
+                tracker_id = detections.tracker_id[i]
+                label_parts.append(f"#{tracker_id}")
+
+            # Add class name or ID
+            if self.show_class:
+                if detections.class_id is not None:
+                    class_id = detections.class_id[i]
+                    if self.class_names and class_id in self.class_names:
+                        label_parts.append(self.class_names[class_id])
+                    else:
+                        label_parts.append(f"class_{class_id}")
+
+            # Add confidence
+            if self.show_confidence and detections.confidence is not None:
+                confidence = detections.confidence[i]
+                conf_str = f"{confidence:.{self.confidence_decimals}f}"
+                label_parts.append(conf_str)
+
+            # Combine parts
+            label = " ".join(label_parts) if label_parts else ""
+            labels.append(label)
+
+        data[self.labels_key] = labels
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Always process."""
+        return True
+
+
+class TraceAnnotatorStep:
+    """
+    Pipeline step for drawing tracking traces/trails using TraceAnnotator.
+
+    Visualizes the path of tracked objects over time. This step requires
+    detections with tracker_id to be present in the data dictionary.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.TraceAnnotatorStep(trace_length=50)
+            | sv.AnnotationStep(sv.BoxAnnotator())
+            | sv.DisplaySink("Tracking with Traces")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom trace configuration
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.TraceAnnotatorStep(
+                trace_length=100,
+                thickness=3,
+                color=sv.ColorPalette.DEFAULT
+            )
+            | sv.DisplaySink("Object Tracking with Trails")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        trace_length: int = 30,
+        thickness: int = 2,
+        color: Any = None,
+        detections_key: str = "detections",
+        output_key: str = "frame",
+    ):
+        """
+        Initialize TraceAnnotator step.
+
+        Args:
+            trace_length: Number of frames to keep in the trace history
+            thickness: Thickness of the trace lines
+            color: Color or ColorPalette for traces (default: ColorPalette.DEFAULT)
+            detections_key: Key in data dict containing Detections object
+                (default: 'detections')
+            output_key: Key to store annotated frame (default: overwrites 'frame')
+        """
+        if color is None:
+            color = ColorPalette.DEFAULT
+
+        self.trace_annotator = TraceAnnotator(
+            color=color,
+            trace_length=trace_length,
+            thickness=thickness,
+        )
+        self.detections_key = detections_key
+        self.output_key = output_key
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Draw traces on the frame.
+
+        Args:
+            data: Pipeline data containing 'frame' and detections with tracker_id
+
+        Returns:
+            Data with annotated frame showing tracking traces
+        """
+        frame = data.get("frame")
+        detections = data.get(self.detections_key)
+
+        if frame is None:
+            return data
+
+        # Make a copy if we might modify the original
+        if self.output_key == "frame":
+            annotated_frame = frame.copy()
+        else:
+            annotated_frame = frame
+
+        # Draw traces if detections with tracker_id exist
+        if (
+            detections is not None
+            and isinstance(detections, Detections)
+            and len(detections) > 0
+            and hasattr(detections, "tracker_id")
+            and detections.tracker_id is not None
+        ):
+            annotated_frame = self.trace_annotator.annotate(
+                scene=annotated_frame, detections=detections
+            )
+
+        data[self.output_key] = annotated_frame
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data

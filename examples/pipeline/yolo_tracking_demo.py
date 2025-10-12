@@ -65,22 +65,6 @@ def webcam_tracking(
     print(f"Tracking activation threshold: {track_activation_threshold}")
     print("Press 'q' or ESC to quit\n")
 
-    # Create annotators
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
-
-    # Custom callback to add tracker labels
-    def add_tracker_labels(data):
-        detections = data.get("detections")
-        if detections is not None and hasattr(detections, "tracker_id"):
-            # Create labels with tracker IDs
-            labels = []
-            if detections.tracker_id is not None:
-                for tracker_id in detections.tracker_id:
-                    labels.append(f"ID: {tracker_id}")
-                data["labels"] = labels
-        return data
-
     # Build pipeline with optional resolution
     webcam_kwargs = {"camera_id": camera_id}
     if width is not None:
@@ -88,23 +72,28 @@ def webcam_tracking(
     if height is not None:
         webcam_kwargs["height"] = height
 
+    # Create YOLO detection step
+    yolo_step = sv.YOLODetectionStep(
+        model_path=model_path,
+        conf=conf,
+        iou=iou,
+        device=device,
+        verbose=False,
+    )
+
     pipeline = (
         sv.Pipeline(sv.WebcamSource(**webcam_kwargs))
         | sv.FPSCalculatorStep()
-        | sv.YOLODetectionStep(
-            model_path=model_path,
-            conf=conf,
-            iou=iou,
-            device=device,
-            verbose=False,
-        )
+        | yolo_step
         | sv.ByteTrackerStep(
             track_activation_threshold=track_activation_threshold,
             lost_track_buffer=lost_track_buffer,
             minimum_matching_threshold=minimum_matching_threshold,
         )
-        | sv.TransformStep(add_tracker_labels)
-        | sv.AnnotationStep([box_annotator, label_annotator])
+        | sv.TraceAnnotatorStep(trace_length=50, thickness=2)
+        | sv.BoxAnnotatorStep(copy_frame=False)
+        | sv.LabelFormatterStep(class_names=yolo_step.model.names)
+        | sv.LabelAnnotatorStep(copy_frame=False)
         | sv.DisplaySink("YOLO Tracking", show_fps=True)
     )
 
@@ -145,40 +134,29 @@ def file_tracking(
     print(f"Tracking activation threshold: {track_activation_threshold}")
     print("Press 'q' or ESC to quit\n")
 
-    # Create annotators
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
-
-    # Custom callback to add tracker labels
-    def add_tracker_labels(data):
-        detections = data.get("detections")
-        if detections is not None and hasattr(detections, "tracker_id"):
-            # Create labels with tracker IDs
-            labels = []
-            if detections.tracker_id is not None:
-                for tracker_id in detections.tracker_id:
-                    labels.append(f"ID: {tracker_id}")
-                data["labels"] = labels
-        return data
+    # Create YOLO detection step
+    yolo_step = sv.YOLODetectionStep(
+        model_path=model_path,
+        conf=conf,
+        iou=iou,
+        device=device,
+        verbose=False,
+    )
 
     # Build pipeline
     pipeline = (
         sv.Pipeline(sv.VideoFileSource(video_path))
         | sv.FPSCalculatorStep()
-        | sv.YOLODetectionStep(
-            model_path=model_path,
-            conf=conf,
-            iou=iou,
-            device=device,
-            verbose=False,
-        )
+        | yolo_step
         | sv.ByteTrackerStep(
             track_activation_threshold=track_activation_threshold,
             lost_track_buffer=lost_track_buffer,
             minimum_matching_threshold=minimum_matching_threshold,
         )
-        | sv.TransformStep(add_tracker_labels)
-        | sv.AnnotationStep([box_annotator, label_annotator])
+        | sv.TraceAnnotatorStep(trace_length=50, thickness=2)
+        | sv.BoxAnnotatorStep(copy_frame=False)
+        | sv.LabelFormatterStep(class_names=yolo_step.model.names)
+        | sv.LabelAnnotatorStep(copy_frame=False)
         | sv.DisplaySink("YOLO Tracking", show_fps=True)
     )
 

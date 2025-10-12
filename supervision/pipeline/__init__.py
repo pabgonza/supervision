@@ -18,18 +18,23 @@ from supervision.pipeline.sources import (
 )
 from supervision.pipeline.steps import (
     AnnotationStep,
+    BoxAnnotatorStep,
     ByteTrackerStep,
     CallbackStep,
     DetectionFilterStep,
     FilterStep,
     FPSCalculatorStep,
+    LabelAnnotatorStep,
+    LabelFormatterStep,
     ResizeStep,
+    TraceAnnotatorStep,
     TransformStep,
     YOLODetectionStep,
 )
 
 __all__ = [
     "AnnotationStep",
+    "BoxAnnotatorStep",
     "ByteTrackerStep",
     "CallbackSink",
     "CallbackStep",
@@ -40,6 +45,8 @@ __all__ = [
     "FPSCalculatorStep",
     "FilterStep",
     "FrameGeneratorSource",
+    "LabelAnnotatorStep",
+    "LabelFormatterStep",
     "MultiSink",
     # Core
     "Pipeline",
@@ -48,6 +55,7 @@ __all__ = [
     "PipelineStep",
     "ResizeStep",
     "StreamSource",
+    "TraceAnnotatorStep",
     "TransformStep",
     "VideoFileSink",
     # Sources
