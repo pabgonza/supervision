@@ -480,3 +480,124 @@ class YOLODetectionStep:
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
         return "frame" in data
+
+
+class ByteTrackerStep:
+    """
+    Pipeline step for object tracking using ByteTrack algorithm.
+
+    Tracks detections across frames and adds tracker_id to each detection.
+    This step requires detections to already be present in the data dictionary.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt", conf=0.5)
+            | sv.ByteTrackerStep()
+            | sv.AnnotationStep(sv.BoxAnnotator())
+            | sv.DisplaySink("Tracking")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom tracker configuration
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep(
+                track_activation_threshold=0.3,
+                lost_track_buffer=60,
+                minimum_matching_threshold=0.85
+            )
+            | sv.AnnotationStep([
+                sv.BoxAnnotator(),
+                sv.LabelAnnotator()
+            ])
+            | sv.DisplaySink("Object Tracking")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        track_activation_threshold: float = 0.25,
+        lost_track_buffer: int = 30,
+        minimum_matching_threshold: float = 0.8,
+        frame_rate: int = 30,
+        minimum_consecutive_frames: int = 1,
+        detections_key: str = "detections",
+    ):
+        """
+        Initialize ByteTrack tracking step.
+
+        Args:
+            track_activation_threshold: Detection confidence threshold for track
+                activation. Increasing this improves accuracy and stability but might
+                miss true detections. Decreasing increases completeness but risks
+                introducing noise.
+            lost_track_buffer: Number of frames to buffer when a track is lost.
+                Increasing this enhances occlusion handling and reduces track
+                fragmentation from brief detection gaps.
+            minimum_matching_threshold: Threshold for matching tracks with detections.
+                Increasing improves accuracy but risks fragmentation. Decreasing
+                improves completeness but risks false positives and drift.
+            frame_rate: Frame rate of the video being processed.
+            minimum_consecutive_frames: Number of consecutive frames an object must
+                be tracked before considered a 'valid' track. Increasing prevents
+                accidental tracks from false detections but risks missing shorter
+                tracks.
+            detections_key: Key in data dict containing Detections object
+                (default: 'detections')
+        """
+        from supervision.tracker.byte_tracker.core import ByteTrack
+
+        self.detections_key = detections_key
+        self.tracker = ByteTrack(
+            track_activation_threshold=track_activation_threshold,
+            lost_track_buffer=lost_track_buffer,
+            minimum_matching_threshold=minimum_matching_threshold,
+            frame_rate=frame_rate,
+            minimum_consecutive_frames=minimum_consecutive_frames,
+        )
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Track detections across frames.
+
+        Args:
+            data: Pipeline data containing detections
+
+        Returns:
+            Data with updated detections containing tracker_id field
+        """
+        detections = data.get(self.detections_key)
+
+        if detections is None or len(detections) == 0:
+            return data
+
+        # Update tracker with detections
+        tracked_detections = self.tracker.update_with_detections(detections)
+
+        # Update data with tracked detections
+        data[self.detections_key] = tracked_detections
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if detections exist."""
+        return self.detections_key in data
+
+    def reset(self) -> None:
+        """
+        Reset the tracker state.
+
+        Useful when processing multiple videos sequentially or when you need
+        to restart tracking from scratch.
+        """
+        self.tracker.reset()

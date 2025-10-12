@@ -18,6 +18,7 @@ from supervision.pipeline.sources import (
 )
 from supervision.pipeline.steps import (
     AnnotationStep,
+    ByteTrackerStep,
     CallbackStep,
     DetectionFilterStep,
     FilterStep,
@@ -29,6 +30,7 @@ from supervision.pipeline.steps import (
 
 __all__ = [
     "AnnotationStep",
+    "ByteTrackerStep",
     "CallbackSink",
     "CallbackStep",
     "DetectionFilterStep",
