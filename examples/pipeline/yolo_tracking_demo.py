@@ -37,8 +37,8 @@ def webcam_tracking(
     track_activation_threshold: float = 0.25,
     lost_track_buffer: int = 30,
     minimum_matching_threshold: float = 0.8,
-    width: int = 640,
-    height: int = 480,
+    width: int | None = None,
+    height: int | None = None,
 ):
     """
     Demo pipeline with webcam source, detection, and tracking.
@@ -52,12 +52,15 @@ def webcam_tracking(
         track_activation_threshold: Tracker activation threshold
         lost_track_buffer: Frames to buffer lost tracks
         minimum_matching_threshold: Minimum matching threshold for tracker
-        width: Camera width
-        height: Camera height
+        width: Camera width (None for default)
+        height: Camera height (None for default)
     """
     print(f"Loading YOLO model: {model_path}")
     print(f"Device: {device}")
-    print(f"Camera: {camera_id} ({width}x{height})")
+    if width and height:
+        print(f"Camera: {camera_id} ({width}x{height})")
+    else:
+        print(f"Camera: {camera_id} (default resolution)")
     print(f"Detection confidence: {conf}")
     print(f"Tracking activation threshold: {track_activation_threshold}")
     print("Press 'q' or ESC to quit\n")
@@ -78,9 +81,15 @@ def webcam_tracking(
                 data["labels"] = labels
         return data
 
-    # Build pipeline
+    # Build pipeline with optional resolution
+    webcam_kwargs = {"camera_id": camera_id}
+    if width is not None:
+        webcam_kwargs["width"] = width
+    if height is not None:
+        webcam_kwargs["height"] = height
+
     pipeline = (
-        sv.Pipeline(sv.WebcamSource(camera_id=camera_id, width=width, height=height))
+        sv.Pipeline(sv.WebcamSource(**webcam_kwargs))
         | sv.FPSCalculatorStep()
         | sv.YOLODetectionStep(
             model_path=model_path,
@@ -259,15 +268,15 @@ def main():
     parser.add_argument(
         "--width",
         type=int,
-        default=640,
-        help="Camera width (default: 640)",
+        default=None,
+        help="Camera width (default: webcam default)",
     )
 
     parser.add_argument(
         "--height",
         type=int,
-        default=480,
-        help="Camera height (default: 480)",
+        default=None,
+        help="Camera height (default: webcam default)",
     )
 
     args = parser.parse_args()
