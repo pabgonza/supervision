@@ -15,10 +15,6 @@ You can download it from: https://github.com/ultralytics/ultralytics
 
 import supervision as sv
 
-# Create annotators
-box_annotator = sv.BoxAnnotator()
-label_annotator = sv.LabelAnnotator()
-
 # Build detection pipeline
 
 #source = sv.Pipeline(sv.StreamSource(stream_url='rtsp://192.168.18.169:554/live1s3.sdp'))
@@ -28,7 +24,7 @@ pipeline = (
     source
     | sv.FPSCalculatorStep()
     | sv.YOLODetectionStep("yolov8n.pt", conf=0.5, device="cuda")
-    | sv.AnnotationStep([box_annotator, label_annotator])
+    | sv.BoxAnnotatorStep()
     | sv.DisplaySink("YOLO Detection", show_fps=True)
 )
 

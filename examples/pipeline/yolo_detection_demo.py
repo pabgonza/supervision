@@ -93,10 +93,6 @@ def main():
     print(f"Camera: {args.camera} ({args.width}x{args.height})")
     print("Press 'q' or ESC to quit\n")
 
-    # Create annotators
-    box_annotator = sv.BoxAnnotator()
-    label_annotator = sv.LabelAnnotator()
-
     # Build pipeline
     pipeline = (
         sv.Pipeline(
@@ -109,7 +105,7 @@ def main():
             device=args.device,
             verbose=False,
         )
-        | sv.AnnotationStep([box_annotator, label_annotator])
+        | sv.BoxAnnotatorStep()
     )
 
     # Add FPS calculator if requested
@@ -129,7 +125,7 @@ def main():
                 device=args.device,
                 verbose=False,
             )
-            | sv.AnnotationStep([box_annotator, label_annotator])
+            | sv.BoxAnnotatorStep()
             | sv.DisplaySink("YOLO Detection", show_fps=True)
         )
     else:

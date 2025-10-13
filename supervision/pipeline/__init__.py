@@ -17,7 +17,6 @@ from supervision.pipeline.sources import (
     WebcamSource,
 )
 from supervision.pipeline.steps import (
-    AnnotationStep,
     BoxAnnotatorStep,
     ByteTrackerStep,
     CallbackStep,
@@ -28,12 +27,12 @@ from supervision.pipeline.steps import (
     LabelFormatterStep,
     ResizeStep,
     TraceAnnotatorStep,
+    TrackerAnnotatorStep,
     TransformStep,
     YOLODetectionStep,
 )
 
 __all__ = [
-    "AnnotationStep",
     "BoxAnnotatorStep",
     "ByteTrackerStep",
     "CallbackSink",
@@ -56,6 +55,7 @@ __all__ = [
     "ResizeStep",
     "StreamSource",
     "TraceAnnotatorStep",
+    "TrackerAnnotatorStep",
     "TransformStep",
     "VideoFileSink",
     # Sources

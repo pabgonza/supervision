@@ -123,10 +123,10 @@ class Pipeline:
         import supervision as sv
 
         # Create pipeline with source
-        pipeline = sv.Pipeline(source=sv.VideoFileSource("video.mp4"))
+        pipeline = sv.Pipeline(source=sv.WebcamSource())
 
         # Add steps using | operator
-        pipeline = pipeline | sv.DetectionStep(model) | sv.AnnotationStep(annotator)
+        pipeline = pipeline | sv.YOLODetectionStep("yolov8n.pt") | sv.BoxAnnotatorStep()
 
         # Add sink
         pipeline = pipeline | sv.DisplaySink("Detection")

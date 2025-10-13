@@ -106,7 +106,7 @@ class VideoFileSink(PipelineSink):
 
         pipeline = (
             sv.Pipeline(source)
-            | sv.AnnotationStep(annotator)
+            | sv.BoxAnnotatorStep()
             | sv.VideoFileSink("output.mp4", fps=30, width=1920, height=1080)
         )
         pipeline.run()
@@ -222,7 +222,7 @@ class MultiSink(PipelineSink):
             sv.VideoFileSink("output.mp4", fps=30, width=1920, height=1080),
         ])
 
-        pipeline = sv.Pipeline(source) | sv.AnnotationStep(annotator) | sink
+        pipeline = sv.Pipeline(source) | sv.BoxAnnotatorStep() | sink
         pipeline.run()
         ```
     """

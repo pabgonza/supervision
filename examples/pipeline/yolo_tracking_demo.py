@@ -90,10 +90,12 @@ def webcam_tracking(
             lost_track_buffer=lost_track_buffer,
             minimum_matching_threshold=minimum_matching_threshold,
         )
-        | sv.TraceAnnotatorStep(trace_length=50, thickness=2)
-        | sv.BoxAnnotatorStep(copy_frame=False)
-        | sv.LabelFormatterStep(class_names=yolo_step.model.names)
-        | sv.LabelAnnotatorStep(copy_frame=False)
+        | sv.TrackerAnnotatorStep(
+            class_names=yolo_step.model.names,
+            trace_length=50,
+            trace_thickness=2,
+            copy_frame=False,
+        )
         | sv.DisplaySink("YOLO Tracking", show_fps=True)
     )
 
@@ -153,10 +155,12 @@ def file_tracking(
             lost_track_buffer=lost_track_buffer,
             minimum_matching_threshold=minimum_matching_threshold,
         )
-        | sv.TraceAnnotatorStep(trace_length=50, thickness=2)
-        | sv.BoxAnnotatorStep(copy_frame=False)
-        | sv.LabelFormatterStep(class_names=yolo_step.model.names)
-        | sv.LabelAnnotatorStep(copy_frame=False)
+        | sv.TrackerAnnotatorStep(
+            class_names=yolo_step.model.names,
+            trace_length=50,
+            trace_thickness=2,
+            copy_frame=False,
+        )
         | sv.DisplaySink("YOLO Tracking", show_fps=True)
     )
 
