@@ -1754,6 +1754,15 @@ class AsyncDetectionStep(ABC):
         with self._result_lock:
             return self._metrics.copy()
 
+    def get_queue_size(self) -> tuple[int, int]:
+        """
+        Get current queue size and maximum queue size.
+
+        Returns:
+            Tuple of (current_size, max_size)
+        """
+        return (self._inference_queue.qsize(), self.max_queue_size)
+
     def reset_metrics(self) -> None:
         """Reset all metrics counters."""
         with self._result_lock:
