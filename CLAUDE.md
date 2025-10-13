@@ -8,6 +8,11 @@ Supervision is a Python computer vision library that provides reusable utilities
 
 ## Development Commands
 
+**IMPORTANT:** Always use the `supervision_dev` conda environment for all commands and tests:
+```bash
+conda run -n supervision_dev <command>
+```
+
 ### Environment Setup
 ```bash
 # Install in development mode with all dependencies
