@@ -117,11 +117,14 @@ from supervision.key_points.annotators import (
 from supervision.key_points.core import KeyPoints
 from supervision.metrics.detection import ConfusionMatrix, MeanAveragePrecision
 from supervision.pipeline import (
+    AsyncDetectionStep,
+    AsyncYOLODetectionStep,
     BoxAnnotatorStep,
     ByteTrackerStep,
     CallbackSink,
     CallbackStep,
     DetectionFilterStep,
+    DetectionStrategy,
     DisplaySink,
     FilterStep,
     FPSCalculatorStep,
@@ -175,6 +178,8 @@ from supervision.utils.video import (
 __all__ = [
     "LMM",
     "AdvancedAnnotator",
+    "AsyncDetectionStep",
+    "AsyncYOLODetectionStep",
     "BackgroundOverlayAnnotator",
     "BaseDataset",
     "BlurAnnotator",
@@ -200,6 +205,7 @@ __all__ = [
     "DetectionFilterStep",
     "Detections",
     "DetectionsSmoother",
+    "DetectionStrategy",
     "DisplaySink",
     "DotAnnotator",
     "EdgeAnnotator",

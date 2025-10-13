@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import time
+from abc import ABC, abstractmethod
 from collections.abc import Iterable
+from enum import Enum
+from queue import Empty, Queue
+from threading import Event, Lock, Thread
 from typing import Any, Callable
 
 import numpy as np
@@ -1436,3 +1441,480 @@ class LineZoneAnnotatorStep:
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame and line_zone exist."""
         return "frame" in data and self.line_zone_key in data
+
+
+class DetectionStrategy(Enum):
+    """
+    Strategy for handling slow detectors in async detection steps.
+
+    Attributes:
+        SKIP_WHEN_BUSY: Skip frames when detector is busy, use last cached result
+        USE_LAST_RESULT: Always return cached result, queue frame for async processing
+        QUEUE_LATEST: Queue frames for processing, discard old frames when queue full
+        SYNCHRONOUS: Traditional synchronous processing (blocks pipeline)
+    """
+
+    SKIP_WHEN_BUSY = "skip"
+    USE_LAST_RESULT = "cache"
+    QUEUE_LATEST = "queue"
+    SYNCHRONOUS = "sync"
+
+
+class AsyncDetectionStep(ABC):
+    """
+    Base class for asynchronous object detection steps.
+
+    This class provides a framework for running object detection in a separate
+    thread to avoid blocking the pipeline when the detector is slower than the
+    frame rate. Different strategies can be used to handle the timing mismatch.
+
+    The class uses a worker thread that continuously processes frames from a queue,
+    storing results that can be retrieved by the main pipeline thread.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        # Create async detector with caching strategy
+        detector = sv.AsyncYOLODetectionStep(
+            model_path="yolov8n.pt",
+            strategy=sv.DetectionStrategy.USE_LAST_RESULT,
+            device="cuda"
+        )
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | detector
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Async Detection")
+        )
+        pipeline.run()
+
+        # Check metrics
+        metrics = detector.get_metrics()
+        print(f"Frames processed: {metrics['frames_processed']}")
+        print(f"Frames cached: {metrics['frames_cached']}")
+        ```
+    """
+
+    def __init__(
+        self,
+        strategy: DetectionStrategy = DetectionStrategy.USE_LAST_RESULT,
+        max_queue_size: int = 2,
+        inference_timeout: float = 0.5,
+    ):
+        """
+        Initialize async detection step.
+
+        Args:
+            strategy: Strategy for handling timing mismatch between detector and source
+            max_queue_size: Maximum frames to queue for processing (lower = less latency)
+            inference_timeout: Maximum time to wait for inference results (seconds)
+        """
+        self.strategy = strategy
+        self.max_queue_size = max_queue_size
+        self.inference_timeout = inference_timeout
+
+        # Threading components
+        self._inference_queue: Queue = Queue(maxsize=max_queue_size)
+        self._result_lock = Lock()
+        self._stop_event = Event()
+        self._worker_thread: Thread | None = None
+
+        # State
+        self._last_detections: Detections | None = None
+        self._last_frame_timestamp: float = 0.0
+        self._inference_in_progress = False
+        self._is_running = False
+
+        # Metrics
+        self._metrics = {
+            "frames_processed": 0,
+            "frames_skipped": 0,
+            "frames_cached": 0,
+            "frames_queued": 0,
+            "avg_inference_time_ms": 0.0,
+            "queue_full_count": 0,
+            "total_inference_time_ms": 0.0,
+        }
+
+    @abstractmethod
+    def _run_inference(self, frame: np.ndarray) -> Detections:
+        """
+        Run inference on a frame. Must be implemented by subclasses.
+
+        Args:
+            frame: Input frame for detection
+
+        Returns:
+            Detections object with detection results
+        """
+        pass
+
+    def _inference_worker(self) -> None:
+        """Worker thread that continuously processes frames from the queue."""
+        while not self._stop_event.is_set():
+            try:
+                # Get frame from queue with timeout
+                frame_data = self._inference_queue.get(timeout=0.1)
+
+                if frame_data is None:  # Poison pill
+                    break
+
+                frame, timestamp = frame_data
+
+                # Run inference
+                start_time = time.time()
+                self._inference_in_progress = True
+
+                detections = self._run_inference(frame)
+
+                inference_time_ms = (time.time() - start_time) * 1000
+
+                # Update results and metrics
+                with self._result_lock:
+                    self._last_detections = detections
+                    self._last_frame_timestamp = timestamp
+                    self._inference_in_progress = False
+
+                    # Update metrics
+                    self._metrics["frames_processed"] += 1
+                    self._metrics["total_inference_time_ms"] += inference_time_ms
+                    self._metrics["avg_inference_time_ms"] = (
+                        self._metrics["total_inference_time_ms"]
+                        / self._metrics["frames_processed"]
+                    )
+
+                self._inference_queue.task_done()
+
+            except Empty:
+                continue
+            except Exception as e:
+                # Log error but don't crash the worker
+                print(f"Error in inference worker: {e}")
+                self._inference_in_progress = False
+                continue
+
+    def start(self) -> AsyncDetectionStep:
+        """
+        Start the inference worker thread.
+
+        Returns:
+            Self for method chaining
+        """
+        if not self._is_running:
+            self._stop_event.clear()
+            self._worker_thread = Thread(
+                target=self._inference_worker, name="AsyncDetectionWorker", daemon=True
+            )
+            self._worker_thread.start()
+            self._is_running = True
+        return self
+
+    def stop(self) -> None:
+        """Stop the inference worker thread and cleanup resources."""
+        if self._is_running:
+            self._stop_event.set()
+            # Send poison pill
+            try:
+                self._inference_queue.put(None, timeout=1.0)
+            except:
+                pass
+
+            if self._worker_thread:
+                self._worker_thread.join(timeout=2.0)
+
+            self._is_running = False
+
+    def _enqueue_frame(self, frame: np.ndarray) -> bool:
+        """
+        Try to enqueue a frame for processing.
+
+        Args:
+            frame: Frame to enqueue
+
+        Returns:
+            True if frame was enqueued, False if queue was full
+        """
+        try:
+            self._inference_queue.put_nowait((frame, time.time()))
+            with self._result_lock:
+                self._metrics["frames_queued"] += 1
+            return True
+        except:
+            with self._result_lock:
+                self._metrics["queue_full_count"] += 1
+            return False
+
+    def _clear_queue(self) -> None:
+        """Clear old frames from queue."""
+        cleared = 0
+        while not self._inference_queue.empty():
+            try:
+                self._inference_queue.get_nowait()
+                self._inference_queue.task_done()
+                cleared += 1
+            except:
+                break
+
+    def _use_cached_result(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Return cached detection result.
+
+        Args:
+            data: Pipeline data
+
+        Returns:
+            Data with cached detections added
+        """
+        with self._result_lock:
+            if self._last_detections is not None:
+                data["detections"] = self._last_detections
+                self._metrics["frames_cached"] += 1
+            else:
+                # No cached result yet, return empty detections
+                data["detections"] = Detections.empty()
+
+        return data
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Process frame according to selected strategy.
+
+        Args:
+            data: Pipeline data containing 'frame'
+
+        Returns:
+            Data with 'detections' field added
+        """
+        frame = data.get("frame")
+        if frame is None:
+            return data
+
+        # Start worker thread if not running
+        if not self._is_running:
+            self.start()
+
+        if self.strategy == DetectionStrategy.SYNCHRONOUS:
+            # Synchronous mode: block and wait for result
+            start_time = time.time()
+            detections = self._run_inference(frame)
+            inference_time_ms = (time.time() - start_time) * 1000
+
+            data["detections"] = detections
+            with self._result_lock:
+                self._metrics["frames_processed"] += 1
+                self._metrics["total_inference_time_ms"] += inference_time_ms
+                self._metrics["avg_inference_time_ms"] = (
+                    self._metrics["total_inference_time_ms"]
+                    / self._metrics["frames_processed"]
+                )
+
+        elif self.strategy == DetectionStrategy.SKIP_WHEN_BUSY:
+            # Skip if busy, otherwise enqueue
+            if self._inference_in_progress or self._inference_queue.full():
+                data = self._use_cached_result(data)
+                with self._result_lock:
+                    self._metrics["frames_skipped"] += 1
+            else:
+                self._enqueue_frame(frame)
+                data = self._use_cached_result(data)
+
+        elif self.strategy == DetectionStrategy.USE_LAST_RESULT:
+            # Always enqueue and return cached result
+            self._enqueue_frame(frame)
+            data = self._use_cached_result(data)
+
+        elif self.strategy == DetectionStrategy.QUEUE_LATEST:
+            # Clear queue and enqueue latest frame
+            if self._inference_queue.full():
+                self._clear_queue()
+            self._enqueue_frame(frame)
+            data = self._use_cached_result(data)
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data
+
+    def get_metrics(self) -> dict[str, Any]:
+        """
+        Get performance metrics.
+
+        Returns:
+            Dictionary with metrics:
+                - frames_processed: Total frames processed by detector
+                - frames_skipped: Frames skipped due to busy detector
+                - frames_cached: Times cached result was used
+                - frames_queued: Total frames enqueued
+                - avg_inference_time_ms: Average inference time in milliseconds
+                - queue_full_count: Times queue was full
+        """
+        with self._result_lock:
+            return self._metrics.copy()
+
+    def reset_metrics(self) -> None:
+        """Reset all metrics counters."""
+        with self._result_lock:
+            for key in self._metrics:
+                if isinstance(self._metrics[key], (int, float)):
+                    self._metrics[key] = 0
+
+    def __del__(self):
+        """Cleanup on deletion."""
+        self.stop()
+
+
+class AsyncYOLODetectionStep(AsyncDetectionStep):
+    """
+    Asynchronous YOLO object detection step.
+
+    This step runs YOLO inference in a separate thread, allowing the pipeline
+    to continue processing frames even when detection is slower than the frame rate.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        # Basic async detection with default caching strategy
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.AsyncYOLODetectionStep("yolov8n.pt", device="cuda")
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Async YOLO")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Skip frames when detector is busy (lowest latency)
+        detector = sv.AsyncYOLODetectionStep(
+            model_path="yolov8n.pt",
+            strategy=sv.DetectionStrategy.SKIP_WHEN_BUSY,
+            conf=0.5,
+            device="cuda"
+        )
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.FPSCalculatorStep()
+            | detector
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Low Latency Detection")
+        )
+
+        # Monitor metrics
+        for data in pipeline:
+            metrics = detector.get_metrics()
+            print(f"FPS: {data.get('fps', 0):.1f}")
+            print(f"Avg inference: {metrics['avg_inference_time_ms']:.1f}ms")
+            print(f"Frames skipped: {metrics['frames_skipped']}")
+        ```
+
+        ```python
+        # Queue latest frames (best accuracy)
+        detector = sv.AsyncYOLODetectionStep(
+            model_path="yolov8n.pt",
+            strategy=sv.DetectionStrategy.QUEUE_LATEST,
+            max_queue_size=5,
+            device="cuda"
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.25,
+        iou: float = 0.45,
+        device: str = "cuda",
+        verbose: bool = False,
+        strategy: DetectionStrategy = DetectionStrategy.USE_LAST_RESULT,
+        max_queue_size: int = 2,
+        inference_timeout: float = 0.5,
+        warmup: bool = True,
+    ):
+        """
+        Initialize async YOLO detection step.
+
+        Args:
+            model_path: Path to YOLO model file (.pt)
+            conf: Confidence threshold for detections (0.0-1.0)
+            iou: IOU threshold for NMS (0.0-1.0)
+            device: Device for inference ('cuda' or 'cpu')
+            verbose: Whether to print verbose YOLO output
+            strategy: Detection strategy for handling slow inference
+            max_queue_size: Maximum frames to queue (lower = less latency)
+            inference_timeout: Maximum time to wait for results (seconds)
+            warmup: Whether to run warmup inference on model load
+        """
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError(
+                "ultralytics is required for AsyncYOLODetectionStep. "
+                "Install it with: pip install ultralytics"
+            )
+
+        # Initialize base class
+        super().__init__(
+            strategy=strategy,
+            max_queue_size=max_queue_size,
+            inference_timeout=inference_timeout,
+        )
+
+        # YOLO parameters
+        self.model_path = model_path
+        self.conf = conf
+        self.iou = iou
+        self.device = device
+        self.verbose = verbose
+
+        # Load model
+        self.model = YOLO(model_path)
+        self.model.to(device)
+
+        # Warmup model
+        if warmup:
+            self._warmup_model()
+
+        # Start worker thread
+        self.start()
+
+    def _warmup_model(self) -> None:
+        """
+        Warmup the model with a dummy inference.
+
+        This ensures CUDA is initialized and model weights are loaded,
+        avoiding slow first inference.
+        """
+        dummy_frame = np.zeros((640, 640, 3), dtype=np.uint8)
+        try:
+            _ = self.model.predict(
+                source=dummy_frame,
+                conf=self.conf,
+                iou=self.iou,
+                verbose=False,
+            )
+        except Exception as e:
+            print(f"Warning: Model warmup failed: {e}")
+
+    def _run_inference(self, frame: np.ndarray) -> Detections:
+        """
+        Run YOLO inference on frame.
+
+        Args:
+            frame: Input frame for detection
+
+        Returns:
+            Detections object with detection results
+        """
+        results = self.model.predict(
+            source=frame,
+            conf=self.conf,
+            iou=self.iou,
+            verbose=self.verbose,
+        )
+
+        return Detections.from_ultralytics(results[0])

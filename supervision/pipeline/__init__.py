@@ -17,10 +17,13 @@ from supervision.pipeline.sources import (
     WebcamSource,
 )
 from supervision.pipeline.steps import (
+    AsyncDetectionStep,
+    AsyncYOLODetectionStep,
     BoxAnnotatorStep,
     ByteTrackerStep,
     CallbackStep,
     DetectionFilterStep,
+    DetectionStrategy,
     FilterStep,
     FPSCalculatorStep,
     LabelAnnotatorStep,
@@ -35,11 +38,14 @@ from supervision.pipeline.steps import (
 )
 
 __all__ = [
+    "AsyncDetectionStep",
+    "AsyncYOLODetectionStep",
     "BoxAnnotatorStep",
     "ByteTrackerStep",
     "CallbackSink",
     "CallbackStep",
     "DetectionFilterStep",
+    "DetectionStrategy",
     # Sinks
     "DisplaySink",
     # Steps
