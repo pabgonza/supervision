@@ -2,7 +2,7 @@
 YOLO object detection pipeline demo.
 
 This example demonstrates how to use YOLODetectionStep for real-time
-object detection with webcam, displaying annotated results.
+object detection with webcam, video file, or RTSP stream.
 
 Requirements:
     pip install ultralytics
@@ -11,14 +11,23 @@ Usage:
     # Download a YOLO model first (or use your own):
     # https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
 
-    # Run with default model
-    python examples/yolo_detection_demo.py --model yolov8n.pt
+    # Run with webcam (default)
+    python examples/pipeline/yolo_detection_demo.py --model yolov8n.pt
+
+    # Run with video file
+    python examples/pipeline/yolo_detection_demo.py --model yolov8n.pt \
+        --source file --input video.mp4
+
+    # Run with RTSP stream
+    python examples/pipeline/yolo_detection_demo.py --model yolov8n.pt \
+        --source stream --stream-url rtsp://camera.local/stream
 
     # Run with custom settings
-    python examples/yolo_detection_demo.py --model yolov8n.pt --conf 0.5 --camera 0
+    python examples/pipeline/yolo_detection_demo.py --model yolov8n.pt \
+        --conf 0.5 --camera 0 --show-fps
 
     # Use CPU instead of GPU
-    python examples/yolo_detection_demo.py --model yolov8n.pt --device cpu
+    python examples/pipeline/yolo_detection_demo.py --model yolov8n.pt --device cpu
 """
 
 import argparse
@@ -37,10 +46,30 @@ def main():
     )
 
     parser.add_argument(
+        "--source",
+        type=str,
+        choices=["webcam", "file", "stream"],
+        default="webcam",
+        help="Source type (default: webcam)",
+    )
+
+    parser.add_argument(
+        "--input",
+        type=str,
+        help="Path to video file (for file source)",
+    )
+
+    parser.add_argument(
+        "--stream-url",
+        type=str,
+        help="Stream URL (for stream source, e.g., rtsp://camera.local/stream)",
+    )
+
+    parser.add_argument(
         "--camera",
         type=int,
         default=0,
-        help="Camera ID (default: 0)",
+        help="Camera ID (default: 0, for webcam source)",
     )
 
     parser.add_argument(
@@ -90,14 +119,41 @@ def main():
     print(f"Loading YOLO model: {args.model}")
     print(f"Device: {args.device}")
     print(f"Confidence threshold: {args.conf}")
-    print(f"Camera: {args.camera} ({args.width}x{args.height})")
+    print(f"Source: {args.source}")
+    if args.source == "webcam":
+        print(f"Camera: {args.camera} ({args.width}x{args.height})")
+    elif args.source == "file":
+        print(f"Input file: {args.input}")
+    elif args.source == "stream":
+        print(f"Stream URL: {args.stream_url}")
     print("Press 'q' or ESC to quit\n")
 
-    # Build pipeline
-    pipeline = (
-        sv.Pipeline(
-            sv.WebcamSource(camera_id=args.camera, width=args.width, height=args.height)
+    # Create source based on type
+    if args.source == "webcam":
+        pipeline_source = sv.WebcamSource(
+            camera_id=args.camera, width=args.width, height=args.height
         )
+    elif args.source == "file":
+        if not args.input:
+            raise ValueError("--input required for file source")
+        pipeline_source = sv.VideoFileSource(args.input)
+    elif args.source == "stream":
+        if not args.stream_url:
+            raise ValueError("--stream-url required for stream source")
+        pipeline_source = sv.StreamSource(args.stream_url)
+    else:
+        raise ValueError(f"Unknown source type: {args.source}")
+
+    # Build pipeline
+    pipeline = sv.Pipeline(pipeline_source)
+
+    # Add FPS calculator if requested
+    if args.show_fps:
+        pipeline = pipeline | sv.FPSCalculatorStep()
+
+    # Add detection and annotation steps
+    pipeline = (
+        pipeline
         | sv.YOLODetectionStep(
             model_path=args.model,
             conf=args.conf,
@@ -108,26 +164,9 @@ def main():
         | sv.BoxAnnotatorStep()
     )
 
-    # Add FPS calculator if requested
+    # Add display sink
     if args.show_fps:
-        # Rebuild pipeline with FPS
-        pipeline = (
-            sv.Pipeline(
-                sv.WebcamSource(
-                    camera_id=args.camera, width=args.width, height=args.height
-                )
-            )
-            | sv.FPSCalculatorStep()
-            | sv.YOLODetectionStep(
-                model_path=args.model,
-                conf=args.conf,
-                iou=args.iou,
-                device=args.device,
-                verbose=False,
-            )
-            | sv.BoxAnnotatorStep()
-            | sv.DisplaySink("YOLO Detection", show_fps=True)
-        )
+        pipeline = pipeline | sv.DisplaySink("YOLO Detection", show_fps=True)
     else:
         pipeline = pipeline | sv.DisplaySink("YOLO Detection")
 
