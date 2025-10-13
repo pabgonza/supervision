@@ -16,6 +16,7 @@ from supervision.annotators.core import (
     LabelAnnotator,
     TraceAnnotator,
 )
+from supervision.annotators.utils import ColorLookup
 from supervision.detection.core import Detections
 from supervision.detection.line_zone import LineZone, LineZoneAnnotator
 from supervision.draw.color import Color, ColorPalette
@@ -563,6 +564,7 @@ class BoxAnnotatorStep:
         self,
         thickness: int = 2,
         color: Any = None,
+        color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
         output_key: str = "frame",
         copy_frame: bool = True,
@@ -573,6 +575,8 @@ class BoxAnnotatorStep:
         Args:
             thickness: Thickness of bounding box lines
             color: Color or ColorPalette for boxes
+            color_lookup: Strategy for mapping colors to annotations
+                (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections
             output_key: Key to store annotated frame
             copy_frame: Whether to copy frame before annotating (default: True)
@@ -580,7 +584,9 @@ class BoxAnnotatorStep:
         if color is None:
             color = ColorPalette.DEFAULT
 
-        self.box_annotator = BoxAnnotator(color=color, thickness=thickness)
+        self.box_annotator = BoxAnnotator(
+            color=color, thickness=thickness, color_lookup=color_lookup
+        )
         self.detections_key = detections_key
         self.output_key = output_key
         self.copy_frame = copy_frame
@@ -643,6 +649,7 @@ class LabelAnnotatorStep:
         text_thickness: int = 1,
         text_padding: int = 10,
         color: Any = None,
+        color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
         labels_key: str = "labels",
         output_key: str = "frame",
@@ -657,6 +664,8 @@ class LabelAnnotatorStep:
             text_thickness: Thickness of text
             text_padding: Padding around text
             color: Color or ColorPalette for label background
+            color_lookup: Strategy for mapping colors to annotations
+                (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections
             labels_key: Key in data dict containing labels list
             output_key: Key to store annotated frame
@@ -674,6 +683,7 @@ class LabelAnnotatorStep:
             text_thickness=text_thickness,
             text_padding=text_padding,
             color=color,
+            color_lookup=color_lookup,
         )
         self.detections_key = detections_key
         self.labels_key = labels_key
@@ -886,6 +896,7 @@ class TraceAnnotatorStep:
         trace_length: int = 30,
         thickness: int = 2,
         color: Any = None,
+        color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
         output_key: str = "frame",
     ):
@@ -896,6 +907,8 @@ class TraceAnnotatorStep:
             trace_length: Number of frames to keep in the trace history
             thickness: Thickness of the trace lines
             color: Color or ColorPalette for traces (default: ColorPalette.DEFAULT)
+            color_lookup: Strategy for mapping colors to annotations
+                (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections object
                 (default: 'detections')
             output_key: Key to store annotated frame (default: overwrites 'frame')
@@ -907,6 +920,7 @@ class TraceAnnotatorStep:
             color=color,
             trace_length=trace_length,
             thickness=thickness,
+            color_lookup=color_lookup,
         )
         self.detections_key = detections_key
         self.output_key = output_key
@@ -1015,6 +1029,7 @@ class TrackerAnnotatorStep:
         trace_length: int = 30,
         trace_thickness: int = 2,
         trace_color: Any = None,
+        color_lookup: ColorLookup = ColorLookup.TRACK,
         detections_key: str = "detections",
         output_key: str = "frame",
         copy_frame: bool = True,
@@ -1040,6 +1055,9 @@ class TrackerAnnotatorStep:
             trace_length: Number of frames to keep in trace history
             trace_thickness: Thickness of trace lines
             trace_color: Color or ColorPalette for traces (default: ColorPalette.DEFAULT)
+            color_lookup: Strategy for mapping colors to all annotations
+                (default: ColorLookup.TRACK). Options: INDEX, CLASS, TRACK.
+                Applied to boxes, labels, and traces.
             detections_key: Key in data dict containing Detections object
             output_key: Key to store annotated frame (default: overwrites 'frame')
             copy_frame: Whether to copy frame before annotating (default: True)
@@ -1055,18 +1073,22 @@ class TrackerAnnotatorStep:
             trace_color = ColorPalette.DEFAULT
 
         # Initialize annotators
-        self.box_annotator = BoxAnnotator(color=box_color, thickness=box_thickness)
+        self.box_annotator = BoxAnnotator(
+            color=box_color, thickness=box_thickness, color_lookup=color_lookup
+        )
         self.label_annotator = LabelAnnotator(
             text_color=label_text_color,
             text_scale=label_text_scale,
             text_thickness=label_text_thickness,
             text_padding=label_text_padding,
             color=label_color,
+            color_lookup=color_lookup,
         )
         self.trace_annotator = TraceAnnotator(
             color=trace_color,
             trace_length=trace_length,
             thickness=trace_thickness,
+            color_lookup=color_lookup,
         )
 
         # Label formatter parameters
@@ -1471,6 +1493,13 @@ class AsyncDetectionStep(ABC):
     The class uses a worker thread that continuously processes frames from a queue,
     storing results that can be retrieved by the main pipeline thread.
 
+    Important: In asynchronous strategies (SKIP_WHEN_BUSY, USE_LAST_RESULT,
+    QUEUE_LATEST), the pipeline returns the processed frame along with its
+    detections to ensure perfect alignment. This means downstream steps see
+    slightly delayed frames but with synchronized detections, eliminating visual
+    misalignment at the cost of additional latency. The SYNCHRONOUS strategy
+    processes frames immediately without this delay.
+
     Examples:
         ```python
         import supervision as sv
@@ -1523,6 +1552,7 @@ class AsyncDetectionStep(ABC):
 
         # State
         self._last_detections: Detections | None = None
+        self._last_frame: np.ndarray | None = None
         self._last_frame_timestamp: float = 0.0
         self._inference_in_progress = False
         self._is_running = False
@@ -1574,6 +1604,7 @@ class AsyncDetectionStep(ABC):
                 # Update results and metrics
                 with self._result_lock:
                     self._last_detections = detections
+                    self._last_frame = frame
                     self._last_frame_timestamp = timestamp
                     self._inference_in_progress = False
 
@@ -1659,17 +1690,18 @@ class AsyncDetectionStep(ABC):
 
     def _use_cached_result(self, data: dict[str, Any]) -> dict[str, Any]:
         """
-        Return cached detection result.
+        Return cached detection result with matching frame.
 
         Args:
             data: Pipeline data
 
         Returns:
-            Data with cached detections added
+            Data with cached detections and frame added
         """
         with self._result_lock:
-            if self._last_detections is not None:
+            if self._last_detections is not None and self._last_frame is not None:
                 data["detections"] = self._last_detections
+                data["frame"] = self._last_frame
                 self._metrics["frames_cached"] += 1
             else:
                 # No cached result yet, return empty detections
@@ -1753,6 +1785,15 @@ class AsyncDetectionStep(ABC):
         """
         with self._result_lock:
             return self._metrics.copy()
+
+    def get_queue_size(self) -> tuple[int, int]:
+        """
+        Get current queue size and maximum queue size.
+
+        Returns:
+            Tuple of (current_size, max_size)
+        """
+        return (self._inference_queue.qsize(), self.max_queue_size)
 
     def reset_metrics(self) -> None:
         """Reset all metrics counters."""

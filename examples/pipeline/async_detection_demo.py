@@ -17,11 +17,19 @@ Usage:
 
     # Test with video file
     python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
-        --input video.mp4 --strategy cache
+        --source file --input video.mp4 --strategy cache
 
-    # Compare all strategies side-by-side
+    # Test with RTSP stream
+    python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
+        --source stream --stream-url rtsp://camera.local/stream
+
+    # Compare all strategies side-by-side (webcam)
     python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
         --compare
+
+    # Compare all strategies with stream
+    python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
+        --compare --source stream --stream-url rtsp://192.168.1.100/stream
 
 Strategies:
     skip  : Skip frames when detector is busy (lowest latency)
@@ -34,7 +42,66 @@ import argparse
 import time
 
 import cv2
+import numpy as np
 import supervision as sv
+
+
+def create_metrics_overlay_callback(detector):
+    """
+    Create a callback function that overlays detector metrics on the frame.
+
+    Args:
+        detector: AsyncYOLODetectionStep instance to get metrics from
+
+    Returns:
+        Callback function for use with CallbackStep
+    """
+
+    def overlay_metrics(data: dict) -> None:
+        """Draw metrics overlay on frame."""
+        frame = data.get("frame")
+        if frame is None:
+            return
+
+        # Get metrics
+        metrics = detector.get_metrics()
+        queue_size, max_queue = detector.get_queue_size()
+        fps = data.get("fps", 0)
+
+        # Prepare metrics text
+        metrics_text = [
+            f"FPS: {fps:.1f}",
+            f"Processed: {metrics['frames_processed']}",
+            f"Cached: {metrics['frames_cached']}",
+            f"Skipped: {metrics['frames_skipped']}",
+            f"Queue: {queue_size}/{max_queue}",
+            f"Queue Full: {metrics['queue_full_count']}",
+            f"Inference: {metrics['avg_inference_time_ms']:.1f}ms",
+        ]
+
+        # Position and styling
+        x, y = 10, 30
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.6
+        font_thickness = 2
+        line_height = 30
+        text_color = (255, 255, 255)  # White
+        bg_color = (0, 0, 0)  # Black
+
+        # Draw semi-transparent background
+        overlay = frame.copy()
+        bg_height = len(metrics_text) * line_height + 20
+        cv2.rectangle(overlay, (5, 5), (300, bg_height), bg_color, -1)
+        cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
+
+        # Draw text
+        for i, text in enumerate(metrics_text):
+            y_pos = y + i * line_height
+            cv2.putText(
+                frame, text, (x, y_pos), font, font_scale, text_color, font_thickness
+            )
+
+    return overlay_metrics
 
 
 def run_single_strategy(
@@ -42,6 +109,7 @@ def run_single_strategy(
     strategy: sv.DetectionStrategy,
     source: str = "webcam",
     video_path: str | None = None,
+    stream_url: str | None = None,
     camera_id: int = 0,
     conf: float = 0.25,
     device: str = "cuda",
@@ -52,8 +120,9 @@ def run_single_strategy(
     Args:
         model_path: Path to YOLO model
         strategy: Detection strategy to use
-        source: Source type ('webcam' or 'file')
+        source: Source type ('webcam', 'file', or 'stream')
         video_path: Path to video file (for file source)
+        stream_url: Stream URL (for stream source)
         camera_id: Camera ID (for webcam source)
         conf: Detection confidence threshold
         device: Device for inference
@@ -71,49 +140,39 @@ def run_single_strategy(
         conf=conf,
         device=device,
         strategy=strategy,
-        max_queue_size=2 if strategy == sv.DetectionStrategy.QUEUE_LATEST else 1,
+        max_queue_size=10 if strategy == sv.DetectionStrategy.QUEUE_LATEST else 1,
         warmup=True,
     )
 
     # Create source
     if source == "webcam":
         pipeline_source = sv.WebcamSource(camera_id=camera_id)
-    else:
+    elif source == "file":
         if not video_path:
             raise ValueError("--input required for file source")
         pipeline_source = sv.VideoFileSource(video_path)
+    elif source == "stream":
+        if not stream_url:
+            raise ValueError("--stream-url required for stream source")
+        pipeline_source = sv.StreamSource(stream_url)
+    else:
+        raise ValueError(f"Unknown source type: {source}")
 
-    # Build pipeline
+    # Build pipeline with metrics overlay
     pipeline = (
         sv.Pipeline(pipeline_source)
         | sv.FPSCalculatorStep()
         | detector
-        | sv.BoxAnnotatorStep()
-        | sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=True)
+        | sv.BoxAnnotatorStep(copy_frame=False)
+        | sv.LabelAnnotatorStep(copy_frame=False)
+        | sv.CallbackStep(create_metrics_overlay_callback(detector))
+        | sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False)
     )
-
-    # Metrics display
-    last_metrics_time = time.time()
-    metrics_interval = 2.0  # Update metrics every 2 seconds
 
     try:
         for data in pipeline:
-            # Periodically print metrics
-            current_time = time.time()
-            if current_time - last_metrics_time >= metrics_interval:
-                metrics = detector.get_metrics()
-                fps = data.get("fps", 0)
-
-                print(f"\n--- Metrics ({strategy_name}) ---")
-                print(f"Pipeline FPS: {fps:.1f}")
-                print(f"Frames processed: {metrics['frames_processed']}")
-                print(f"Frames cached: {metrics['frames_cached']}")
-                print(f"Frames skipped: {metrics['frames_skipped']}")
-                print(f"Frames queued: {metrics['frames_queued']}")
-                print(f"Avg inference time: {metrics['avg_inference_time_ms']:.1f}ms")
-                print(f"Queue full count: {metrics['queue_full_count']}")
-
-                last_metrics_time = current_time
+            # Metrics are now displayed on frame via CallbackStep
+            pass
 
     except (KeyboardInterrupt, StopIteration):
         print(f"\n\nStopped {strategy_name} detection")
@@ -125,6 +184,8 @@ def run_single_strategy(
         print(f"Total frames processed: {metrics['frames_processed']}")
         print(f"Total frames cached: {metrics['frames_cached']}")
         print(f"Total frames skipped: {metrics['frames_skipped']}")
+        print(f"Total frames queued: {metrics['frames_queued']}")
+        print(f"Queue full count: {metrics['queue_full_count']}")
         print(f"Avg inference time: {metrics['avg_inference_time_ms']:.1f}ms")
 
         # Stop detector
@@ -135,6 +196,7 @@ def compare_strategies(
     model_path: str,
     source: str = "webcam",
     video_path: str | None = None,
+    stream_url: str | None = None,
     camera_id: int = 0,
     conf: float = 0.25,
     device: str = "cuda",
@@ -144,8 +206,9 @@ def compare_strategies(
 
     Args:
         model_path: Path to YOLO model
-        source: Source type ('webcam' or 'file')
+        source: Source type ('webcam', 'file', or 'stream')
         video_path: Path to video file (for file source)
+        stream_url: Stream URL (for stream source)
         camera_id: Camera ID (for webcam source)
         conf: Detection confidence threshold
         device: Device for inference
@@ -177,16 +240,23 @@ def compare_strategies(
     # Create source
     if source == "webcam":
         pipeline_source = sv.WebcamSource(camera_id=camera_id)
-    else:
+    elif source == "file":
         if not video_path:
             raise ValueError("--input required for file source")
         pipeline_source = sv.VideoFileSource(video_path)
+    elif source == "stream":
+        if not stream_url:
+            raise ValueError("--stream-url required for stream source")
+        pipeline_source = sv.StreamSource(stream_url)
+    else:
+        raise ValueError(f"Unknown source type: {source}")
 
     # Process frames manually to show in multiple windows
     try:
         frame_count = 0
-        for frame in pipeline_source:
+        for source_data in pipeline_source:
             frame_count += 1
+            frame = source_data["frame"]
 
             # Process frame with each detector
             for detector, name in detectors:
@@ -216,11 +286,14 @@ def compare_strategies(
 
                 # Show metrics
                 metrics = detector.get_metrics()
+                queue_size, max_queue = detector.get_queue_size()
                 y_offset = 70
                 metrics_text = [
                     f"Processed: {metrics['frames_processed']}",
                     f"Cached: {metrics['frames_cached']}",
                     f"Skipped: {metrics['frames_skipped']}",
+                    f"Queue: {queue_size}/{max_queue}",
+                    f"Queue Full: {metrics['queue_full_count']}",
                     f"Inference: {metrics['avg_inference_time_ms']:.1f}ms",
                 ]
 
@@ -259,6 +332,7 @@ def compare_strategies(
             print(f"  Processed: {metrics['frames_processed']}")
             print(f"  Cached: {metrics['frames_cached']}")
             print(f"  Skipped: {metrics['frames_skipped']}")
+            print(f"  Queue full count: {metrics['queue_full_count']}")
             print(f"  Avg inference: {metrics['avg_inference_time_ms']:.1f}ms")
 
 
@@ -277,7 +351,7 @@ def main():
     parser.add_argument(
         "--source",
         type=str,
-        choices=["webcam", "file"],
+        choices=["webcam", "file", "stream"],
         default="webcam",
         help="Source type (default: webcam)",
     )
@@ -286,6 +360,12 @@ def main():
         "--input",
         type=str,
         help="Path to video file (for file source)",
+    )
+
+    parser.add_argument(
+        "--stream-url",
+        type=str,
+        help="Stream URL (for stream source, e.g., rtsp://camera.local/stream)",
     )
 
     parser.add_argument(
@@ -339,6 +419,7 @@ def main():
             model_path=args.model,
             source=args.source,
             video_path=args.input,
+            stream_url=args.stream_url,
             camera_id=args.camera,
             conf=args.conf,
             device=args.device,
@@ -350,6 +431,7 @@ def main():
             strategy=strategy,
             source=args.source,
             video_path=args.input,
+            stream_url=args.stream_url,
             camera_id=args.camera,
             conf=args.conf,
             device=args.device,
