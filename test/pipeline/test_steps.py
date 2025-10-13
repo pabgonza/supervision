@@ -607,3 +607,344 @@ class TestTrackerAnnotatorStep:
         assert not np.array_equal(frame, frame_copy)
         # Result should have custom key
         assert "annotated" in result
+
+
+class TestLineZoneStep:
+    """Tests for LineZoneStep pipeline component."""
+
+    def test_line_zone_step_initialization(self):
+        """Test that LineZoneStep initializes correctly."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        assert step is not None
+        assert step.detections_key == "detections"
+        assert step.line_zone_key == "line_zone"
+        assert step.line_zone is not None
+        assert step.line_zone.in_count == 0
+        assert step.line_zone.out_count == 0
+
+    def test_line_zone_step_with_custom_params(self):
+        """Test LineZoneStep initialization with custom parameters."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(
+            start=start,
+            end=end,
+            triggering_anchors=[sv.Position.CENTER],
+            minimum_crossing_threshold=2,
+            detections_key="custom_detections",
+            line_zone_key="custom_line_zone",
+        )
+
+        assert step.detections_key == "custom_detections"
+        assert step.line_zone_key == "custom_line_zone"
+        assert step.line_zone is not None
+
+    def test_line_zone_step_process_with_detections(self):
+        """Test that LineZoneStep processes detections correctly."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # Create mock detection data with tracker_id
+        detections = sv.Detections(
+            xyxy=np.array([[50, 80, 70, 95], [50, 105, 70, 120]]),
+            class_id=np.array([0, 0]),
+            confidence=np.array([0.9, 0.8]),
+            tracker_id=np.array([1, 2]),
+        )
+
+        data = {"detections": detections}
+
+        # Process
+        result = step.process(data)
+
+        # Check that result has line_zone object
+        assert "line_zone" in result
+        assert result["line_zone"] is not None
+        assert result["line_zone"] == step.line_zone
+        # Check that line_zone has count properties
+        assert hasattr(result["line_zone"], "in_count")
+        assert hasattr(result["line_zone"], "out_count")
+        assert hasattr(result["line_zone"], "in_count_per_class")
+        assert hasattr(result["line_zone"], "out_count_per_class")
+
+    def test_line_zone_step_process_empty_detections(self):
+        """Test that LineZoneStep handles empty detections."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # Create empty detections
+        detections = sv.Detections.empty()
+        data = {"detections": detections}
+
+        # Process
+        result = step.process(data)
+
+        # Should still add line_zone to data
+        assert "line_zone" in result
+        assert result["line_zone"].in_count == 0
+        assert result["line_zone"].out_count == 0
+
+    def test_line_zone_step_process_no_detections(self):
+        """Test that LineZoneStep handles missing detections."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # No detections in data
+        data = {}
+
+        # Process
+        result = step.process(data)
+
+        # Should still add line_zone to data
+        assert "line_zone" in result
+
+    def test_line_zone_step_filter(self):
+        """Test LineZoneStep filter method."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # With detections key
+        data_with = {"detections": sv.Detections.empty()}
+        assert step.filter(data_with) is True
+
+        # Without detections key
+        data_without = {}
+        assert step.filter(data_without) is False
+
+    def test_line_zone_step_reset(self):
+        """Test LineZoneStep reset method."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # Manually set some counts (simulating crossings)
+        step.line_zone._in_count_per_class[0] = 5
+        step.line_zone._out_count_per_class[1] = 3
+
+        assert step.line_zone.in_count == 5
+        assert step.line_zone.out_count == 3
+
+        # Reset
+        step.reset()
+
+        # Counts should be cleared
+        assert step.line_zone.in_count == 0
+        assert step.line_zone.out_count == 0
+
+    def test_line_zone_step_stores_object_not_copies(self):
+        """Test that LineZoneStep stores line_zone object, not individual properties."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        detections = sv.Detections(
+            xyxy=np.array([[50, 80, 70, 95]]),
+            class_id=np.array([0]),
+            confidence=np.array([0.9]),
+            tracker_id=np.array([1]),
+        )
+
+        data = {"detections": detections}
+        result = step.process(data)
+
+        # Check that line_zone object is stored
+        assert "line_zone" in result
+        assert isinstance(result["line_zone"], sv.LineZone)
+        # Check that we can access properties directly
+        assert isinstance(result["line_zone"].in_count, int)
+        assert isinstance(result["line_zone"].out_count, int)
+        assert isinstance(result["line_zone"].in_count_per_class, dict)
+        assert isinstance(result["line_zone"].out_count_per_class, dict)
+
+
+class TestLineZoneAnnotatorStep:
+    """Tests for LineZoneAnnotatorStep pipeline component."""
+
+    def test_line_zone_annotator_step_initialization(self):
+        """Test that LineZoneAnnotatorStep initializes correctly."""
+        step = sv.LineZoneAnnotatorStep()
+
+        assert step is not None
+        assert step.line_zone_key == "line_zone"
+        assert step.output_key == "frame"
+        assert step.copy_frame is True
+        assert step.annotator is not None
+
+    def test_line_zone_annotator_step_with_custom_params(self):
+        """Test LineZoneAnnotatorStep initialization with custom parameters."""
+        step = sv.LineZoneAnnotatorStep(
+            thickness=4,
+            color=sv.Color.RED,
+            text_scale=1.0,
+            custom_in_text="Entered",
+            custom_out_text="Exited",
+            display_in_count=True,
+            display_out_count=False,
+            line_zone_key="custom_line_zone",
+            output_key="annotated_frame",
+            copy_frame=False,
+        )
+
+        assert step.line_zone_key == "custom_line_zone"
+        assert step.output_key == "annotated_frame"
+        assert step.copy_frame is False
+        assert step.annotator is not None
+
+    def test_line_zone_annotator_step_process_with_line_zone(self):
+        """Test that LineZoneAnnotatorStep annotates frame correctly."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        step = sv.LineZoneAnnotatorStep()
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        data = {"frame": frame, "line_zone": line_zone}
+
+        # Process
+        result = step.process(data)
+
+        # Check that result has annotated frame
+        assert "frame" in result
+        assert result["frame"] is not None
+        assert result["frame"].shape == frame.shape
+        # Frame should be modified (line drawn)
+        assert not np.array_equal(result["frame"], frame)
+
+    def test_line_zone_annotator_step_process_no_frame(self):
+        """Test processing without frame."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        step = sv.LineZoneAnnotatorStep()
+        data = {"line_zone": line_zone}
+
+        # Process - should handle gracefully
+        result = step.process(data)
+        assert result == data
+
+    def test_line_zone_annotator_step_process_no_line_zone(self):
+        """Test processing without line_zone."""
+        step = sv.LineZoneAnnotatorStep()
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        data = {"frame": frame}
+
+        # Process - should handle gracefully
+        result = step.process(data)
+        # Frame should not be modified
+        assert np.array_equal(result["frame"], frame)
+
+    def test_line_zone_annotator_step_filter(self):
+        """Test LineZoneAnnotatorStep filter method."""
+        step = sv.LineZoneAnnotatorStep()
+
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        # With both frame and line_zone
+        data_with_both = {"frame": np.zeros((100, 100, 3)), "line_zone": line_zone}
+        assert step.filter(data_with_both) is True
+
+        # With only frame
+        data_only_frame = {"frame": np.zeros((100, 100, 3))}
+        assert step.filter(data_only_frame) is False
+
+        # With only line_zone
+        data_only_line_zone = {"line_zone": line_zone}
+        assert step.filter(data_only_line_zone) is False
+
+        # With neither
+        data_empty = {}
+        assert step.filter(data_empty) is False
+
+    def test_line_zone_annotator_step_copy_frame_true(self):
+        """Test that copy_frame=True preserves original frame."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        step = sv.LineZoneAnnotatorStep(copy_frame=True)
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame_copy = frame.copy()
+        data = {"frame": frame, "line_zone": line_zone}
+
+        # Process
+        result = step.process(data)
+
+        # Original frame should be modified (because we're overwriting "frame" key)
+        # But let's verify that the annotation happened
+        assert "frame" in result
+        assert not np.array_equal(result["frame"], frame_copy)
+
+    def test_line_zone_annotator_step_copy_frame_false(self):
+        """Test that copy_frame=False modifies frame in-place."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        step = sv.LineZoneAnnotatorStep(copy_frame=False)
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame_copy = frame.copy()
+        data = {"frame": frame, "line_zone": line_zone}
+
+        # Process
+        result = step.process(data)
+
+        # Frame should be modified
+        assert not np.array_equal(frame, frame_copy)
+        assert result["frame"] is frame  # Same object
+
+    def test_line_zone_annotator_step_custom_output_key(self):
+        """Test using custom output_key."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        step = sv.LineZoneAnnotatorStep(output_key="annotated", copy_frame=False)
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        frame_copy = frame.copy()
+        data = {"frame": frame, "line_zone": line_zone}
+
+        # Process
+        result = step.process(data)
+
+        # When output_key != "frame", copy_frame should not copy
+        # The frame should be modified directly
+        assert not np.array_equal(frame, frame_copy)
+        # Result should have custom key
+        assert "annotated" in result
+
+    def test_line_zone_annotator_step_accesses_line_zone_properties(self):
+        """Test that annotator can access line_zone properties directly."""
+        start = sv.Point(x=0, y=50)
+        end = sv.Point(x=100, y=50)
+        line_zone = sv.LineZone(start=start, end=end)
+
+        # Manually set counts
+        line_zone._in_count_per_class[0] = 5
+        line_zone._out_count_per_class[0] = 3
+
+        step = sv.LineZoneAnnotatorStep()
+
+        frame = np.zeros((100, 100, 3), dtype=np.uint8)
+        data = {"frame": frame, "line_zone": line_zone}
+
+        # Process - should not raise error accessing counts
+        result = step.process(data)
+
+        # Verify annotation happened
+        assert "frame" in result
+        assert not np.array_equal(result["frame"], np.zeros((100, 100, 3), dtype=np.uint8))

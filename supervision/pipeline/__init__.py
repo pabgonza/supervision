@@ -25,6 +25,8 @@ from supervision.pipeline.steps import (
     FPSCalculatorStep,
     LabelAnnotatorStep,
     LabelFormatterStep,
+    LineZoneAnnotatorStep,
+    LineZoneStep,
     ResizeStep,
     TraceAnnotatorStep,
     TrackerAnnotatorStep,
@@ -46,6 +48,8 @@ __all__ = [
     "FrameGeneratorSource",
     "LabelAnnotatorStep",
     "LabelFormatterStep",
+    "LineZoneAnnotatorStep",
+    "LineZoneStep",
     "MultiSink",
     # Core
     "Pipeline",

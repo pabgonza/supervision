@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any, Callable
 
 import numpy as np
@@ -11,7 +12,9 @@ from supervision.annotators.core import (
     TraceAnnotator,
 )
 from supervision.detection.core import Detections
+from supervision.detection.line_zone import LineZone, LineZoneAnnotator
 from supervision.draw.color import Color, ColorPalette
+from supervision.geometry.core import Point, Position
 from supervision.utils.image import resize_image
 from supervision.utils.video import FPSMonitor
 
@@ -1162,3 +1165,274 @@ class TrackerAnnotatorStep:
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
         return "frame" in data
+
+
+class LineZoneStep:
+    """
+    Pipeline step for counting objects crossing a line.
+
+    Uses LineZone to track object crossings and maintain in/out counts.
+    Requires detections with tracker_id (use ByteTrackerStep before this step).
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        # Define line crossing zone
+        start = sv.Point(x=0, y=500)
+        end = sv.Point(x=1920, y=500)
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.LineZoneStep(start=start, end=end)
+            | sv.LineZoneAnnotatorStep()
+            | sv.DisplaySink("Line Counter")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Access crossing counts
+        import supervision as sv
+
+        start = sv.Point(x=0, y=500)
+        end = sv.Point(x=1920, y=500)
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.LineZoneStep(start=start, end=end)
+        )
+
+        for data in pipeline:
+            line_zone = data["line_zone"]
+            print(f"In: {line_zone.in_count}, Out: {line_zone.out_count}")
+        ```
+    """
+
+    def __init__(
+        self,
+        start: Point,
+        end: Point,
+        triggering_anchors: Iterable[Position] = (Position.CENTER,),
+        minimum_crossing_threshold: int = 1,
+        detections_key: str = "detections",
+        line_zone_key: str = "line_zone",
+    ):
+        """
+        Initialize line zone counting step.
+
+        Args:
+            start: Starting point of the line
+            end: Ending point of the line
+            triggering_anchors: List of detection anchor positions to consider
+                for crossing detection (default: CENTER)
+            minimum_crossing_threshold: Number of frames detection must be
+                on other side to count as crossing (default: 1)
+            detections_key: Key in data dict containing Detections object
+                (default: 'detections')
+            line_zone_key: Key to store LineZone object in data dict
+                (default: 'line_zone')
+        """
+        self.detections_key = detections_key
+        self.line_zone_key = line_zone_key
+        self.line_zone = LineZone(
+            start=start,
+            end=end,
+            triggering_anchors=triggering_anchors,
+            minimum_crossing_threshold=minimum_crossing_threshold,
+        )
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Count objects crossing the line.
+
+        Args:
+            data: Pipeline data containing detections with tracker_id
+
+        Returns:
+            Data with line_zone object added. Access counts via:
+            - data["line_zone"].in_count
+            - data["line_zone"].out_count
+            - data["line_zone"].in_count_per_class
+            - data["line_zone"].out_count_per_class
+        """
+        detections = data.get(self.detections_key)
+
+        if detections is not None and len(detections) > 0:
+            # Trigger line zone with detections
+            self.line_zone.trigger(detections)
+
+        # Store line_zone object in data dict
+        data[self.line_zone_key] = self.line_zone
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if detections exist."""
+        return self.detections_key in data
+
+    def reset(self) -> None:
+        """
+        Reset the line zone counts.
+
+        Useful when starting a new video or resetting the counting state.
+        """
+        # Reset internal counters
+        self.line_zone._in_count_per_class.clear()
+        self.line_zone._out_count_per_class.clear()
+        self.line_zone.crossing_state_history.clear()
+
+
+class LineZoneAnnotatorStep:
+    """
+    Pipeline step for visualizing line zone and crossing counts.
+
+    Draws the counting line and displays in/out counts on the frame.
+    Requires line_zone object in data dict (from LineZoneStep).
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        start = sv.Point(x=0, y=500)
+        end = sv.Point(x=1920, y=500)
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.LineZoneStep(start=start, end=end)
+            | sv.LineZoneAnnotatorStep(
+                thickness=4,
+                text_scale=1.0,
+                custom_in_text="Entered",
+                custom_out_text="Exited"
+            )
+            | sv.DisplaySink("Line Counter")
+        )
+        ```
+
+        ```python
+        # Customize colors and text
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | sv.YOLODetectionStep("yolov8n.pt")
+            | sv.ByteTrackerStep()
+            | sv.LineZoneStep(
+                start=sv.Point(x=0, y=500),
+                end=sv.Point(x=1920, y=500)
+            )
+            | sv.LineZoneAnnotatorStep(
+                color=sv.Color.RED,
+                text_color=sv.Color.WHITE,
+                thickness=3,
+                copy_frame=False
+            )
+            | sv.DisplaySink("Counting")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        thickness: int = 2,
+        color: Color = Color.WHITE,
+        text_thickness: int = 2,
+        text_color: Color = Color.BLACK,
+        text_scale: float = 0.5,
+        text_offset: float = 1.5,
+        text_padding: int = 10,
+        custom_in_text: str | None = None,
+        custom_out_text: str | None = None,
+        display_in_count: bool = True,
+        display_out_count: bool = True,
+        display_text_box: bool = True,
+        text_orient_to_line: bool = False,
+        text_centered: bool = True,
+        line_zone_key: str = "line_zone",
+        output_key: str = "frame",
+        copy_frame: bool = True,
+    ):
+        """
+        Initialize line zone annotator step.
+
+        Args:
+            thickness: Line thickness for drawing the zone
+            color: Color of the line
+            text_thickness: Thickness of count text
+            text_color: Color of count text
+            text_scale: Scale of count text
+            text_offset: Distance of text from line
+            text_padding: Padding around text box
+            custom_in_text: Custom label for in count (default: "in")
+            custom_out_text: Custom label for out count (default: "out")
+            display_in_count: Whether to display in count
+            display_out_count: Whether to display out count
+            display_text_box: Whether to display text background box
+            text_orient_to_line: Whether to orient text along line angle
+            text_centered: Whether to center text on line
+            line_zone_key: Key in data dict containing LineZone object
+                (default: 'line_zone')
+            output_key: Key to store annotated frame (default: overwrites 'frame')
+            copy_frame: Whether to copy frame before annotating (default: True)
+        """
+        self.line_zone_key = line_zone_key
+        self.output_key = output_key
+        self.copy_frame = copy_frame
+
+        self.annotator = LineZoneAnnotator(
+            thickness=thickness,
+            color=color,
+            text_thickness=text_thickness,
+            text_color=text_color,
+            text_scale=text_scale,
+            text_offset=text_offset,
+            text_padding=text_padding,
+            custom_in_text=custom_in_text,
+            custom_out_text=custom_out_text,
+            display_in_count=display_in_count,
+            display_out_count=display_out_count,
+            display_text_box=display_text_box,
+            text_orient_to_line=text_orient_to_line,
+            text_centered=text_centered,
+        )
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Annotate frame with line zone and counts.
+
+        Args:
+            data: Pipeline data containing 'frame' and 'line_zone'
+
+        Returns:
+            Data with annotated frame showing line and crossing counts
+        """
+        frame = data.get("frame")
+        line_zone = data.get(self.line_zone_key)
+
+        if frame is None or line_zone is None:
+            return data
+
+        # Copy frame if requested and modifying original
+        if self.copy_frame and self.output_key == "frame":
+            annotated_frame = frame.copy()
+        else:
+            annotated_frame = frame
+
+        # Annotate frame with line zone
+        annotated_frame = self.annotator.annotate(
+            frame=annotated_frame, line_counter=line_zone
+        )
+
+        data[self.output_key] = annotated_frame
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame and line_zone exist."""
+        return "frame" in data and self.line_zone_key in data
