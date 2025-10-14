@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -11,7 +12,6 @@ from typing import Any, Callable
 import numpy as np
 
 from supervision.annotators.core import (
-    BaseAnnotator,
     BoxAnnotator,
     LabelAnnotator,
     TraceAnnotator,
@@ -21,11 +21,100 @@ from supervision.detection.core import Detections
 from supervision.detection.line_zone import LineZone, LineZoneAnnotator
 from supervision.draw.color import Color, ColorPalette
 from supervision.geometry.core import Point, Position
+from supervision.tracker.byte_tracker.core import ByteTrack
 from supervision.utils.image import resize_image
 from supervision.utils.video import FPSMonitor
-from supervision.tracker.byte_tracker.core import ByteTrack
 
-import threading
+
+class DetectionStep(ABC):
+    """
+    Base class for synchronous object detection steps.
+
+    This abstract class provides a common interface for implementing object
+    detection steps that run synchronously (blocking). Subclasses only need to
+    implement the `_run_inference` method to add support for different detection
+    backends.
+
+    The base class handles the pipeline integration by implementing `process()`
+    and `filter()` methods, allowing subclasses to focus solely on the inference
+    logic.
+
+    Examples:
+        ```python
+        import supervision as sv
+        import numpy as np
+
+        # Implement custom detection step
+        class CustomDetectionStep(sv.DetectionStep):
+            def __init__(self, model):
+                self.model = model
+
+            def _run_inference(self, frame: np.ndarray) -> sv.Detections:
+                # Your custom inference logic
+                results = self.model.predict(frame)
+                return sv.Detections(...)
+
+        # Use in pipeline
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | CustomDetectionStep(model)
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Detections")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Built-in YOLO detection step
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt", conf=0.5)
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("YOLO Detections")
+        )
+        pipeline.run()
+        ```
+    """
+
+    @abstractmethod
+    def _run_inference(self, frame: np.ndarray) -> Detections:
+        """
+        Run inference on a frame. Must be implemented by subclasses.
+
+        Args:
+            frame: Input frame for detection
+
+        Returns:
+            Detections object with detection results
+        """
+        pass
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Process frame with object detection.
+
+        Args:
+            data: Pipeline data containing 'frame'
+
+        Returns:
+            Data with 'detections' field added
+        """
+        frame = data.get("frame")
+        if frame is None:
+            return data
+
+        # Run inference
+        detections = self._run_inference(frame)
+        data["detections"] = detections
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return "frame" in data
+
 
 class FPSCalculatorStep:
     """
@@ -339,11 +428,12 @@ class CallbackStep:
         return True
 
 
-class YOLODetectionStep:
+class YOLODetectionStep(DetectionStep):
     """
     Pipeline step for YOLO object detection using Ultralytics.
 
-    Runs YOLO inference on frames and converts results to supervision Detections.
+    This step implements the DetectionStep interface for YOLO models from Ultralytics.
+    It runs YOLO inference on frames and converts results to supervision Detections.
 
     Examples:
         ```python
@@ -395,33 +485,23 @@ class YOLODetectionStep:
         self.model = YOLO(model_path)
         self.model.to(device)
 
-    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+    def _run_inference(self, frame: np.ndarray) -> Detections:
         """
         Run YOLO inference on frame.
 
         Args:
-            data: Pipeline data containing 'frame'
+            frame: Input frame for detection
 
         Returns:
-            Data with 'detections' field added
+            Detections object with detection results
         """
-        frame = data.get("frame")
-        if frame is None:
-            return data
-
         # Run inference
         results = self.model.predict(
             source=frame, conf=self.conf, iou=self.iou, verbose=self.verbose
         )
 
         # Convert to supervision Detections
-        data["detections"] = Detections.from_ultralytics(results[0])
-
-        return data
-
-    def filter(self, data: dict[str, Any]) -> bool:
-        """Process if frame exists."""
-        return "frame" in data
+        return Detections.from_ultralytics(results[0])
 
 
 class ByteTrackerStep:

@@ -23,6 +23,7 @@ from supervision.pipeline.steps import (
     ByteTrackerStep,
     CallbackStep,
     DetectionFilterStep,
+    DetectionStep,
     DetectionStrategy,
     FilterStep,
     FPSCalculatorStep,
@@ -47,6 +48,7 @@ __all__ = [
     "CallbackSink",
     "CallbackStep",
     "DetectionFilterStep",
+    "DetectionStep",
     "DetectionStrategy",
     # Sinks
     "DisplaySink",
