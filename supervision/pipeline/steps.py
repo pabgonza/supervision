@@ -23,7 +23,9 @@ from supervision.draw.color import Color, ColorPalette
 from supervision.geometry.core import Point, Position
 from supervision.utils.image import resize_image
 from supervision.utils.video import FPSMonitor
+from supervision.tracker.byte_tracker.core import ByteTrack
 
+import threading
 
 class FPSCalculatorStep:
     """
@@ -494,7 +496,6 @@ class ByteTrackerStep:
             detections_key: Key in data dict containing Detections object
                 (default: 'detections')
         """
-        from supervision.tracker.byte_tracker.core import ByteTrack
 
         self.detections_key = detections_key
         self.tracker = ByteTrack(
@@ -2487,8 +2488,6 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             Detections object with detection results
         """
         # Get worker ID from thread name
-        import threading
-
         thread_name = threading.current_thread().name
         try:
             worker_id = int(thread_name.split("-")[-1])
