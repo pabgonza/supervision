@@ -1,29 +1,81 @@
 """
-Simple example: Webcam capture with display and video saving.
+Simple pipeline example with video capture.
 
-This demonstrates the minimal code needed to capture from webcam,
-display in real-time, and save to a video file.
+This demonstrates minimal code to capture from webcam, video file, or stream,
+with optional display and video saving.
+
+Usage:
+    # Webcam with display only (default)
+    python examples/pipeline/webcam_simple.py
+
+    # Video file
+    python examples/pipeline/webcam_simple.py --source file --input video.mp4
+
+    # RTSP stream
+    python examples/pipeline/webcam_simple.py --source stream --input rtsp://camera/stream
+
+    # Save to video file
+    python examples/pipeline/webcam_simple.py --output recording.mp4
+
+    # Save without display
+    python examples/pipeline/webcam_simple.py --output recording.mp4 --no-display
+
+    # With FPS display
+    python examples/pipeline/webcam_simple.py --show-fps
 
 Press 'q' or ESC to stop.
 """
 
+import argparse
+
 import supervision as sv
 
-# Create pipeline with webcam source
-pipeline = sv.Pipeline(sv.WebcamSource(camera_id=0, width=640, height=480))
+import utils
 
-# Add FPS calculator
-pipeline = pipeline | sv.FPSCalculatorStep()
 
-# Add multi-sink for simultaneous display and save
-pipeline = pipeline | sv.MultiSink(
-    [
-        sv.DisplaySink("Webcam", show_fps=True),
-        sv.VideoFileSink("output.mp4", fps=30, width=640, height=480),
-    ]
-)
+def main():
+    parser = argparse.ArgumentParser(
+        description="Simple pipeline example with video capture"
+    )
 
-# Run
-print("Recording... Press 'q' or ESC to stop")
-pipeline.run()
-print("Video saved to: output.mp4")
+    # Add standard arguments using utils
+    utils.add_source_arguments(parser)
+    utils.add_sink_arguments(parser)
+    utils.add_fps_arguments(parser)
+
+    args = parser.parse_args()
+
+    # Print configuration
+    print("Simple Pipeline Demo")
+    print("-" * 40)
+    utils.print_source_info(args)
+
+    # Create source
+    source = utils.create_source_from_args(args)
+
+    # Get video info from source for proper output configuration
+    fps, width, height = utils.get_video_info_from_source(source)
+
+    # Build pipeline
+    pipeline = sv.Pipeline(source)
+
+    # Add FPS calculator if requested
+    if args.show_fps:
+        pipeline = pipeline | sv.FPSCalculatorStep()
+
+    # Add sink(s) with video info from source
+    sink = utils.create_sink_from_args(args, "Simple Pipeline", fps, width, height)
+    pipeline = pipeline | sink
+
+    # Run pipeline
+    try:
+        pipeline.run()
+    except (KeyboardInterrupt, StopIteration):
+        if args.output:
+            print(f"\nStopped. Video saved to: {args.output}")
+        else:
+            print("\nStopped.")
+
+
+if __name__ == "__main__":
+    main()

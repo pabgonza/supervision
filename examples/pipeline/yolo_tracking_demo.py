@@ -2,7 +2,7 @@
 YOLO object detection and tracking pipeline demo.
 
 This example demonstrates how to use YOLODetectionStep with ByteTrackerStep
-for real-time object detection and tracking with webcam or video files.
+for real-time object detection and tracking with webcam, video file, or stream.
 
 Requirements:
     pip install ultralytics
@@ -12,163 +12,28 @@ Usage:
     # https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt
 
     # Run with webcam
-    python examples/pipeline/yolo_tracking_demo.py --source webcam --model yolov8n.pt
+    python examples/pipeline/yolo_tracking_demo.py --model yolov8n.pt
 
     # Run with video file
-    python examples/pipeline/yolo_tracking_demo.py --source file \
-        --model yolov8n.pt --input video.mp4
+    python examples/pipeline/yolo_tracking_demo.py --source file --model yolov8n.pt --input video.mp4
+
+    # Run with stream
+    python examples/pipeline/yolo_tracking_demo.py --source stream --model yolov8n.pt --input rtsp://camera/stream
+
+    # With output
+    python examples/pipeline/yolo_tracking_demo.py --model yolov8n.pt --output tracked.mp4
 
     # Custom tracker settings
-    python examples/pipeline/yolo_tracking_demo.py --source webcam \
-        --model yolov8n.pt --track-threshold 0.3 --lost-buffer 60
+    python examples/pipeline/yolo_tracking_demo.py --model yolov8n.pt --track-threshold 0.3 --lost-buffer 60
+
+Press 'q' or ESC to quit.
 """
 
 import argparse
 
 import supervision as sv
 
-
-def webcam_tracking(
-    model_path: str,
-    camera_id: int = 0,
-    conf: float = 0.25,
-    iou: float = 0.45,
-    device: str = "cuda",
-    track_activation_threshold: float = 0.25,
-    lost_track_buffer: int = 30,
-    minimum_matching_threshold: float = 0.8,
-    width: int | None = None,
-    height: int | None = None,
-):
-    """
-    Demo pipeline with webcam source, detection, and tracking.
-
-    Args:
-        model_path: Path to YOLO model file
-        camera_id: Camera device ID
-        conf: Confidence threshold for detections
-        iou: IOU threshold for NMS
-        device: Device for inference
-        track_activation_threshold: Tracker activation threshold
-        lost_track_buffer: Frames to buffer lost tracks
-        minimum_matching_threshold: Minimum matching threshold for tracker
-        width: Camera width (None for default)
-        height: Camera height (None for default)
-    """
-    print(f"Loading YOLO model: {model_path}")
-    print(f"Device: {device}")
-    if width and height:
-        print(f"Camera: {camera_id} ({width}x{height})")
-    else:
-        print(f"Camera: {camera_id} (default resolution)")
-    print(f"Detection confidence: {conf}")
-    print(f"Tracking activation threshold: {track_activation_threshold}")
-    print("Press 'q' or ESC to quit\n")
-
-    # Build pipeline with optional resolution
-    webcam_kwargs = {"camera_id": camera_id}
-    if width is not None:
-        webcam_kwargs["width"] = width
-    if height is not None:
-        webcam_kwargs["height"] = height
-
-    # Create YOLO detection step
-    yolo_step = sv.YOLODetectionStep(
-        model_path=model_path,
-        conf=conf,
-        iou=iou,
-        device=device,
-        verbose=False,
-    )
-
-    pipeline = (
-        sv.Pipeline(sv.WebcamSource(**webcam_kwargs))
-        | sv.FPSCalculatorStep()
-        | yolo_step
-        | sv.ByteTrackerStep(
-            track_activation_threshold=track_activation_threshold,
-            lost_track_buffer=lost_track_buffer,
-            minimum_matching_threshold=minimum_matching_threshold,
-        )
-        | sv.TrackerAnnotatorStep(
-            class_names=yolo_step.model.names,
-            trace_length=50,
-            trace_thickness=2,
-            copy_frame=False,
-        )
-        | sv.DisplaySink("YOLO Tracking", show_fps=True)
-    )
-
-    # Run pipeline
-    try:
-        pipeline.run()
-    except (KeyboardInterrupt, StopIteration):
-        print("\nTracking stopped")
-
-
-def file_tracking(
-    model_path: str,
-    video_path: str,
-    conf: float = 0.25,
-    iou: float = 0.45,
-    device: str = "cuda",
-    track_activation_threshold: float = 0.25,
-    lost_track_buffer: int = 30,
-    minimum_matching_threshold: float = 0.8,
-):
-    """
-    Demo pipeline with video file source, detection, and tracking.
-
-    Args:
-        model_path: Path to YOLO model file
-        video_path: Path to video file
-        conf: Confidence threshold for detections
-        iou: IOU threshold for NMS
-        device: Device for inference
-        track_activation_threshold: Tracker activation threshold
-        lost_track_buffer: Frames to buffer lost tracks
-        minimum_matching_threshold: Minimum matching threshold for tracker
-    """
-    print(f"Loading YOLO model: {model_path}")
-    print(f"Video file: {video_path}")
-    print(f"Device: {device}")
-    print(f"Detection confidence: {conf}")
-    print(f"Tracking activation threshold: {track_activation_threshold}")
-    print("Press 'q' or ESC to quit\n")
-
-    # Create YOLO detection step
-    yolo_step = sv.YOLODetectionStep(
-        model_path=model_path,
-        conf=conf,
-        iou=iou,
-        device=device,
-        verbose=False,
-    )
-
-    # Build pipeline
-    pipeline = (
-        sv.Pipeline(sv.VideoFileSource(video_path))
-        | sv.FPSCalculatorStep()
-        | yolo_step
-        | sv.ByteTrackerStep(
-            track_activation_threshold=track_activation_threshold,
-            lost_track_buffer=lost_track_buffer,
-            minimum_matching_threshold=minimum_matching_threshold,
-        )
-        | sv.TrackerAnnotatorStep(
-            class_names=yolo_step.model.names,
-            trace_length=50,
-            trace_thickness=2,
-            copy_frame=False,
-        )
-        | sv.DisplaySink("YOLO Tracking", show_fps=True)
-    )
-
-    # Run pipeline
-    try:
-        pipeline.run()
-    except (KeyboardInterrupt, StopIteration):
-        print("\nTracking stopped")
+import utils
 
 
 def main():
@@ -176,32 +41,17 @@ def main():
         description="YOLO detection and tracking pipeline demo"
     )
 
-    parser.add_argument(
-        "--source",
-        type=str,
-        choices=["webcam", "file"],
-        default="webcam",
-        help="Source type (default: webcam)",
-    )
+    # Add standard arguments
+    utils.add_source_arguments(parser)
+    utils.add_sink_arguments(parser)
+    utils.add_fps_arguments(parser)
 
+    # Add YOLO-specific arguments
     parser.add_argument(
         "--model",
         type=str,
         required=True,
         help="Path to YOLO model file (.pt)",
-    )
-
-    parser.add_argument(
-        "--input",
-        type=str,
-        help="Path to video file (for file source)",
-    )
-
-    parser.add_argument(
-        "--camera",
-        type=int,
-        default=0,
-        help="Camera ID (default: 0)",
     )
 
     parser.add_argument(
@@ -226,6 +76,7 @@ def main():
         help="Device for inference (default: cuda)",
     )
 
+    # Add tracker-specific arguments
     parser.add_argument(
         "--track-threshold",
         type=float,
@@ -247,55 +98,69 @@ def main():
         help="Minimum matching threshold (default: 0.8)",
     )
 
-    parser.add_argument(
-        "--width",
-        type=int,
-        default=None,
-        help="Camera width (default: webcam default)",
-    )
-
-    parser.add_argument(
-        "--height",
-        type=int,
-        default=None,
-        help="Camera height (default: webcam default)",
-    )
-
     args = parser.parse_args()
 
+    # Print configuration
+    print("YOLO Tracking Demo")
+    print("-" * 40)
+    print(f"Model: {args.model}")
+    print(f"Device: {args.device}")
+    print(f"Detection confidence: {args.conf}")
+    print(f"Tracking activation threshold: {args.track_threshold}")
+    utils.print_source_info(args)
+
+    # Create source
+    source = utils.create_source_from_args(args)
+
+    # Get video info from source for proper output configuration
+    fps, width, height = utils.get_video_info_from_source(source)
+
+    # Create YOLO detection step
+    yolo_step = sv.YOLODetectionStep(
+        model_path=args.model,
+        conf=args.conf,
+        iou=args.iou,
+        device=args.device,
+        verbose=False,
+    )
+
+    # Build pipeline
+    pipeline = sv.Pipeline(source)
+
+    # Add FPS calculator if requested
+    if args.show_fps:
+        pipeline = pipeline | sv.FPSCalculatorStep()
+
+    # Add detection, tracking, and annotation
+    pipeline = (
+        pipeline
+        | yolo_step
+        | sv.ByteTrackerStep(
+            track_activation_threshold=args.track_threshold,
+            lost_track_buffer=args.lost_buffer,
+            minimum_matching_threshold=args.match_threshold,
+        )
+        | sv.TrackerAnnotatorStep(
+            class_names=yolo_step.model.names,
+            trace_length=50,
+            trace_thickness=2,
+            copy_frame=False,
+        )
+    )
+
+    # Add sink(s) with video info from source
+    sink = utils.create_sink_from_args(args, "YOLO Tracking", fps, width, height)
+    pipeline = pipeline | sink
+
+    # Run pipeline
+    print("Starting tracking...")
     try:
-        if args.source == "webcam":
-            webcam_tracking(
-                model_path=args.model,
-                camera_id=args.camera,
-                conf=args.conf,
-                iou=args.iou,
-                device=args.device,
-                track_activation_threshold=args.track_threshold,
-                lost_track_buffer=args.lost_buffer,
-                minimum_matching_threshold=args.match_threshold,
-                width=args.width,
-                height=args.height,
-            )
-        elif args.source == "file":
-            if not args.input:
-                print("Error: --input required for file source")
-                return
-            file_tracking(
-                model_path=args.model,
-                video_path=args.input,
-                conf=args.conf,
-                iou=args.iou,
-                device=args.device,
-                track_activation_threshold=args.track_threshold,
-                lost_track_buffer=args.lost_buffer,
-                minimum_matching_threshold=args.match_threshold,
-            )
-    except KeyboardInterrupt:
-        print("\n\nInterrupted by user")
-    except Exception as e:
-        print(f"\nError: {e}")
-        raise
+        pipeline.run()
+    except (KeyboardInterrupt, StopIteration):
+        if args.output:
+            print(f"\nTracking stopped. Video saved to: {args.output}")
+        else:
+            print("\nTracking stopped.")
 
 
 if __name__ == "__main__":

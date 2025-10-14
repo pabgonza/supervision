@@ -21,7 +21,11 @@ Usage:
 
     # Test with RTSP stream
     python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
-        --source stream --stream-url rtsp://camera.local/stream
+        --source stream --input rtsp://camera.local/stream
+
+    # With output
+    python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
+        --source stream --input rtsp://camera.local/stream --output detections.mp4
 
     # Compare all strategies side-by-side (webcam)
     python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
@@ -29,7 +33,7 @@ Usage:
 
     # Compare all strategies with stream
     python examples/pipeline/async_detection_demo.py --model yolov8n.pt \
-        --compare --source stream --stream-url rtsp://192.168.1.100/stream
+        --compare --source stream --input rtsp://192.168.1.100/stream
 
 Strategies:
     skip  : Skip frames when detector is busy (lowest latency)
@@ -44,6 +48,8 @@ import time
 import cv2
 import numpy as np
 import supervision as sv
+
+import utils
 
 
 def create_metrics_overlay_callback(detector):
@@ -108,11 +114,11 @@ def run_single_strategy(
     model_path: str,
     strategy: sv.DetectionStrategy,
     source: str = "webcam",
-    video_path: str | None = None,
-    stream_url: str | None = None,
+    input_path: str | None = None,
     camera_id: int = 0,
     conf: float = 0.25,
     device: str = "cuda",
+    output_path: str | None = None,
 ):
     """
     Run async detection with a single strategy.
@@ -121,11 +127,11 @@ def run_single_strategy(
         model_path: Path to YOLO model
         strategy: Detection strategy to use
         source: Source type ('webcam', 'file', or 'stream')
-        video_path: Path to video file (for file source)
-        stream_url: Stream URL (for stream source)
+        input_path: Path to video file or stream URL (for file/stream source)
         camera_id: Camera ID (for webcam source)
         conf: Detection confidence threshold
         device: Device for inference
+        output_path: Optional path to save output video
     """
     strategy_name = strategy.value.upper()
     print(f"\n=== Running with {strategy_name} strategy ===")
@@ -144,19 +150,14 @@ def run_single_strategy(
         warmup=True,
     )
 
-    # Create source
-    if source == "webcam":
-        pipeline_source = sv.WebcamSource(camera_id=camera_id)
-    elif source == "file":
-        if not video_path:
-            raise ValueError("--input required for file source")
-        pipeline_source = sv.VideoFileSource(video_path)
-    elif source == "stream":
-        if not stream_url:
-            raise ValueError("--stream-url required for stream source")
-        pipeline_source = sv.StreamSource(stream_url)
-    else:
-        raise ValueError(f"Unknown source type: {source}")
+    # Create source using utils
+    from argparse import Namespace
+    args_for_source = Namespace(
+        source=source,
+        input=input_path,
+        camera=camera_id
+    )
+    pipeline_source = utils.create_source_from_args(args_for_source)
 
     # Build pipeline with metrics overlay
     pipeline = (
@@ -166,8 +167,16 @@ def run_single_strategy(
         | sv.BoxAnnotatorStep(copy_frame=False)
         | sv.LabelAnnotatorStep(copy_frame=False)
         | sv.CallbackStep(create_metrics_overlay_callback(detector))
-        | sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False)
     )
+
+    # Add sink(s)
+    if output_path:
+        pipeline = pipeline | sv.MultiSink([
+            sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False),
+            sv.VideoFileSink(output_path)
+        ])
+    else:
+        pipeline = pipeline | sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False)
 
     try:
         for data in pipeline:
@@ -195,8 +204,7 @@ def run_single_strategy(
 def compare_strategies(
     model_path: str,
     source: str = "webcam",
-    video_path: str | None = None,
-    stream_url: str | None = None,
+    input_path: str | None = None,
     camera_id: int = 0,
     conf: float = 0.25,
     device: str = "cuda",
@@ -207,8 +215,7 @@ def compare_strategies(
     Args:
         model_path: Path to YOLO model
         source: Source type ('webcam', 'file', or 'stream')
-        video_path: Path to video file (for file source)
-        stream_url: Stream URL (for stream source)
+        input_path: Path to video file or stream URL (for file/stream source)
         camera_id: Camera ID (for webcam source)
         conf: Detection confidence threshold
         device: Device for inference
@@ -237,19 +244,14 @@ def compare_strategies(
         )
         detectors.append((detector, name))
 
-    # Create source
-    if source == "webcam":
-        pipeline_source = sv.WebcamSource(camera_id=camera_id)
-    elif source == "file":
-        if not video_path:
-            raise ValueError("--input required for file source")
-        pipeline_source = sv.VideoFileSource(video_path)
-    elif source == "stream":
-        if not stream_url:
-            raise ValueError("--stream-url required for stream source")
-        pipeline_source = sv.StreamSource(stream_url)
-    else:
-        raise ValueError(f"Unknown source type: {source}")
+    # Create source using utils
+    from argparse import Namespace
+    args_for_source = Namespace(
+        source=source,
+        input=input_path,
+        camera=camera_id
+    )
+    pipeline_source = utils.create_source_from_args(args_for_source)
 
     # Process frames manually to show in multiple windows
     try:
@@ -359,13 +361,7 @@ def main():
     parser.add_argument(
         "--input",
         type=str,
-        help="Path to video file (for file source)",
-    )
-
-    parser.add_argument(
-        "--stream-url",
-        type=str,
-        help="Stream URL (for stream source, e.g., rtsp://camera.local/stream)",
+        help="Path to video file (for file source) or stream URL (for stream source)",
     )
 
     parser.add_argument(
@@ -404,6 +400,13 @@ def main():
         help="Compare all strategies side-by-side",
     )
 
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output video file path (optional, only for single strategy mode)",
+    )
+
     args = parser.parse_args()
 
     # Map strategy string to enum
@@ -418,8 +421,7 @@ def main():
         compare_strategies(
             model_path=args.model,
             source=args.source,
-            video_path=args.input,
-            stream_url=args.stream_url,
+            input_path=args.input,
             camera_id=args.camera,
             conf=args.conf,
             device=args.device,
@@ -430,11 +432,11 @@ def main():
             model_path=args.model,
             strategy=strategy,
             source=args.source,
-            video_path=args.input,
-            stream_url=args.stream_url,
+            input_path=args.input,
             camera_id=args.camera,
             conf=args.conf,
             device=args.device,
+            output_path=args.output,
         )
 
 

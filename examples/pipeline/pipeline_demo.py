@@ -2,47 +2,62 @@
 Pipeline demo showcasing the modern pipeline API in supervision.
 
 This demo shows how to use the Pipeline system to build composable
-video processing workflows.
+video processing workflows with different sources and sinks.
 
 Usage:
     # Webcam with FPS display
-    python examples/pipeline_demo.py --source webcam
+    python examples/pipeline/pipeline_demo.py --source webcam --show-fps
 
-    # Video file with FPS
-    python examples/pipeline_demo.py --source file --input video.mp4
+    # Video file
+    python examples/pipeline/pipeline_demo.py --source file --input video.mp4
 
     # RTSP stream
-    python examples/pipeline_demo.py --source stream --input rtsp://192.168.1.100:554/stream
+    python examples/pipeline/pipeline_demo.py --source stream --input rtsp://192.168.1.100:554/stream
+
+    # With output
+    python examples/pipeline/pipeline_demo.py --source webcam --output recording.mp4
 
     # With resize
-    python examples/pipeline_demo.py --source webcam --resize 1280 720
+    python examples/pipeline/pipeline_demo.py --source webcam --resize 1280 720
+
+    # Callback demo
+    python examples/pipeline/pipeline_demo.py --callback
+
+Press 'q' or ESC to quit.
 """
 
 import argparse
-from typing import Optional
 
 import supervision as sv
 
+import utils
 
-def webcam_demo(
-    camera_id: int = 0, show_fps: bool = True, resize: Optional[tuple] = None
+
+def run_pipeline(
+    args: argparse.Namespace,
+    resize: tuple | None = None,
 ):
     """
-    Demo pipeline with webcam source.
+    Run basic pipeline with source, optional resize, and sink.
 
     Args:
-        camera_id: Camera device ID
-        show_fps: Whether to display FPS
+        args: Parsed arguments
         resize: Optional (width, height) tuple for resizing
     """
-    print(f"Starting webcam pipeline (camera {camera_id})")
-    print("Press 'q' or ESC to quit\n")
+    print("Starting pipeline...")
+    utils.print_source_info(args)
+
+    # Create source
+    source = utils.create_source_from_args(args)
+
+    # Get video info from source for proper output configuration
+    fps, width, height = utils.get_video_info_from_source(source)
 
     # Build pipeline
-    pipeline = sv.Pipeline(sv.WebcamSource(camera_id=camera_id))
+    pipeline = sv.Pipeline(source)
 
-    # Add FPS calculator
-    if show_fps:
+    # Add FPS calculator if requested
+    if args.show_fps:
         pipeline = pipeline | sv.FPSCalculatorStep()
 
     # Add resize if requested
@@ -50,102 +65,30 @@ def webcam_demo(
         width, height = resize
         pipeline = pipeline | sv.ResizeStep(width=width, height=height)
 
-    # Add display sink
-    pipeline = pipeline | sv.DisplaySink("Webcam Pipeline", show_fps=show_fps)
+    # Add sink(s) with video info from source
+    sink = utils.create_sink_from_args(args, "Pipeline Demo", fps, width, height)
+    pipeline = pipeline | sink
 
     # Run pipeline
     try:
         pipeline.run()
-    except StopIteration:
-        print("\nPipeline stopped by user")
+    except (KeyboardInterrupt, StopIteration):
+        if args.output:
+            print(f"\nPipeline stopped. Video saved to: {args.output}")
+        else:
+            print("\nPipeline stopped.")
 
 
-def file_demo(video_path: str, show_fps: bool = True, resize: Optional[tuple] = None):
+def run_callback_demo(args: argparse.Namespace):
     """
-    Demo pipeline with video file source.
+    Run pipeline with callback step for custom processing.
 
     Args:
-        video_path: Path to video file
-        show_fps: Whether to display FPS
-        resize: Optional (width, height) tuple for resizing
+        args: Parsed arguments
     """
-    print(f"Starting file pipeline: {video_path}")
-    print("Press 'q' or ESC to quit\n")
-
-    # Build pipeline
-    pipeline = sv.Pipeline(sv.VideoFileSource(video_path))
-
-    # Add FPS calculator
-    if show_fps:
-        pipeline = pipeline | sv.FPSCalculatorStep()
-
-    # Add resize if requested
-    if resize:
-        width, height = resize
-        pipeline = pipeline | sv.ResizeStep(width=width, height=height)
-
-    # Add display sink
-    pipeline = pipeline | sv.DisplaySink("File Pipeline", show_fps=show_fps)
-
-    # Run pipeline
-    try:
-        pipeline.run()
-    except StopIteration:
-        print("\nPipeline stopped")
-
-
-def stream_demo(
-    stream_url: str,
-    transport: str = "tcp",
-    show_fps: bool = True,
-    resize: Optional[tuple] = None,
-):
-    """
-    Demo pipeline with RTSP/RTMP/HTTP stream source.
-
-    Args:
-        stream_url: URL of the stream
-        transport: Transport protocol (tcp/udp)
-        show_fps: Whether to display FPS
-        resize: Optional (width, height) tuple for resizing
-    """
-    print(f"Starting stream pipeline: {stream_url}")
-    print(f"Transport: {transport}")
-    print("Press 'q' or ESC to quit\n")
-
-    # Build pipeline
-    pipeline = sv.Pipeline(
-        sv.StreamSource(stream_url=stream_url, transport=transport, buffer_size=1)
-    )
-
-    # Add FPS calculator
-    if show_fps:
-        pipeline = pipeline | sv.FPSCalculatorStep()
-
-    # Add resize if requested
-    if resize:
-        width, height = resize
-        pipeline = pipeline | sv.ResizeStep(width=width, height=height)
-
-    # Add display sink
-    pipeline = pipeline | sv.DisplaySink("Stream Pipeline", show_fps=show_fps)
-
-    # Run pipeline
-    try:
-        pipeline.run()
-    except StopIteration:
-        print("\nPipeline stopped")
-
-
-def callback_demo(camera_id: int = 0):
-    """
-    Demo pipeline with callback step for custom processing.
-
-    Args:
-        camera_id: Camera device ID
-    """
-    print(f"Starting callback demo (camera {camera_id})")
+    print("Starting callback demo...")
     print("This demo shows frame info in console\n")
+    utils.print_source_info(args)
 
     frame_count = 0
 
@@ -157,19 +100,30 @@ def callback_demo(camera_id: int = 0):
             frame_num = data.get("frame_number", 0)
             print(f"Frame {frame_num}: FPS={fps:.1f}")
 
+    # Create source
+    source = utils.create_source_from_args(args)
+
+    # Get video info from source for proper output configuration
+    fps, width, height = utils.get_video_info_from_source(source)
+
     # Build pipeline with callback
     pipeline = (
-        sv.Pipeline(sv.WebcamSource(camera_id=camera_id))
+        sv.Pipeline(source)
         | sv.FPSCalculatorStep()
         | sv.CallbackStep(log_frame_info)
-        | sv.DisplaySink("Callback Demo", show_fps=True)
     )
+
+    # Add sink(s) with video info from source
+    sink = utils.create_sink_from_args(args, "Callback Demo", fps, width, height)
+    pipeline = pipeline | sink
 
     # Run pipeline
     try:
         pipeline.run()
-    except StopIteration:
+    except (KeyboardInterrupt, StopIteration):
         print(f"\nTotal frames processed: {frame_count}")
+        if args.output:
+            print(f"Video saved to: {args.output}")
 
 
 def main():
@@ -178,25 +132,24 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
 
-    parser.add_argument(
-        "--source",
-        type=str,
-        choices=["webcam", "file", "stream", "callback"],
-        default="webcam",
-        help="Source type (default: webcam)",
-    )
+    # Add standard arguments
+    utils.add_source_arguments(parser)
+    utils.add_sink_arguments(parser)
+    utils.add_fps_arguments(parser)
 
+    # Add demo-specific arguments
     parser.add_argument(
-        "--input",
-        type=str,
-        help="Input path (video file or stream URL)",
-    )
-
-    parser.add_argument(
-        "--camera",
+        "--resize",
+        nargs=2,
         type=int,
-        default=0,
-        help="Camera ID for webcam source (default: 0)",
+        metavar=("WIDTH", "HEIGHT"),
+        help="Resize frames to WIDTH HEIGHT",
+    )
+
+    parser.add_argument(
+        "--callback",
+        action="store_true",
+        help="Run callback demo instead of basic pipeline",
     )
 
     parser.add_argument(
@@ -207,40 +160,14 @@ def main():
         help="Transport for RTSP streams (default: tcp)",
     )
 
-    parser.add_argument(
-        "--no-fps",
-        action="store_true",
-        help="Disable FPS display",
-    )
-
-    parser.add_argument(
-        "--resize",
-        nargs=2,
-        type=int,
-        metavar=("WIDTH", "HEIGHT"),
-        help="Resize frames to WIDTH HEIGHT",
-    )
-
     args = parser.parse_args()
 
-    show_fps = not args.no_fps
-    resize = tuple(args.resize) if args.resize else None
-
     try:
-        if args.source == "webcam":
-            webcam_demo(args.camera, show_fps, resize)
-        elif args.source == "file":
-            if not args.input:
-                print("Error: --input required for file source")
-                return
-            file_demo(args.input, show_fps, resize)
-        elif args.source == "stream":
-            if not args.input:
-                print("Error: --input required for stream source")
-                return
-            stream_demo(args.input, args.transport, show_fps, resize)
-        elif args.source == "callback":
-            callback_demo(args.camera)
+        if args.callback:
+            run_callback_demo(args)
+        else:
+            resize = tuple(args.resize) if args.resize else None
+            run_pipeline(args, resize=resize)
 
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
