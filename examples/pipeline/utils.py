@@ -268,3 +268,42 @@ def print_source_info(args: argparse.Namespace) -> None:
         print("Output: None (display only)")
 
     print("Press 'q' or ESC to quit\n")
+
+
+def print_tracker_metrics(metrics: dict, title: str = "Tracking Metrics") -> None:
+    """
+    Print tracking performance metrics in a formatted table.
+
+    Args:
+        metrics: Dictionary from ByteTrackerStep.get_metrics()
+        title: Title for the metrics section (default: "Tracking Metrics")
+    """
+    print("\n" + "=" * 60)
+    print(title)
+    print("=" * 60)
+    print(f"Frames Processed:     {metrics['frames_processed']}")
+    print(f"Avg Tracking Time:    {metrics['avg_processing_time_ms']:.2f} ms")
+    print(f"Min Tracking Time:    {metrics['min_processing_time_ms']:.2f} ms")
+    print(f"Max Tracking Time:    {metrics['max_processing_time_ms']:.2f} ms")
+    print(f"Total Tracking Time:  {metrics['total_processing_time_s']:.2f} s")
+    print("=" * 60)
+
+
+def get_tracker_step(pipeline) -> Optional[sv.ByteTrackerStep]:
+    """
+    Get ByteTrackerStep from a pipeline.
+
+    Args:
+        pipeline: Supervision pipeline object
+
+    Returns:
+        ByteTrackerStep instance if found, None otherwise
+    """
+    if not hasattr(pipeline, "_steps"):
+        return None
+
+    for step in pipeline._steps:
+        if isinstance(step, sv.ByteTrackerStep):
+            return step
+
+    return None

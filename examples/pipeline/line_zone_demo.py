@@ -228,15 +228,18 @@ def main():
     if args.show_fps:
         pipeline = pipeline | sv.FPSCalculatorStep()
 
+    # Create tracker step
+    tracker_step = sv.ByteTrackerStep(
+        track_activation_threshold=args.track_threshold,
+        lost_track_buffer=args.lost_buffer,
+        minimum_matching_threshold=args.match_threshold,
+    )
+
     # Add detection, tracking, line zone, and annotation
     pipeline = (
         pipeline
         | yolo_step
-        | sv.ByteTrackerStep(
-            track_activation_threshold=args.track_threshold,
-            lost_track_buffer=args.lost_buffer,
-            minimum_matching_threshold=args.match_threshold,
-        )
+        | tracker_step
         | sv.LineZoneStep(
             start=line_start,
             end=line_end,
@@ -272,6 +275,12 @@ def main():
     try:
         pipeline.run()
     except (KeyboardInterrupt, StopIteration):
+        pass
+    finally:
+        # Print tracker metrics
+        tracker_metrics = tracker_step.get_metrics()
+        utils.print_tracker_metrics(tracker_metrics)
+
         if args.output:
             print(f"\nLine counting stopped. Video saved to: {args.output}")
         else:

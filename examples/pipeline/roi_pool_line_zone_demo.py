@@ -629,6 +629,9 @@ def main():
             roi_size = data.get("roi_size", (640, 640))
             roi_offset = data.get("roi_offset", (0, 0))
 
+            # Get tracking time from current frame
+            tracking_time = data.get("tracker_processing_time_ms", 0.0)
+
             # Create metrics text
             lines = [
                 f"Workers: {metrics['workers_active']}",
@@ -641,6 +644,7 @@ def main():
                 f"Dropped: {metrics['frames_dropped']}",
                 f"Input Queue: {queue_current}/{queue_max}",
                 f"Avg Inference: {metrics['avg_inference_time_ms']:.1f}ms",
+                f"Tracking: {tracking_time:.1f}ms",
             ]
 
             # Draw semi-transparent background
@@ -705,11 +709,15 @@ def main():
                 in_count = line_zone.in_count if line_zone is not None else 0
                 out_count = line_zone.out_count if line_zone is not None else 0
 
+                # Get tracking time from current frame
+                tracking_time = data.get("tracker_processing_time_ms", 0.0)
+
                 print(
                     f"Frame {frame_count:4d} | "
                     f"Detections: {len(detections):2d} | Tracked: {num_tracked:2d} | "
                     f"IN: {in_count:3d} | OUT: {out_count:3d} | "
-                    f"Inference: {detector_metrics['avg_inference_time_ms']:5.1f}ms"
+                    f"Inference: {detector_metrics['avg_inference_time_ms']:5.1f}ms | "
+                    f"Tracking: {tracking_time:5.1f}ms"
                 )
 
     except KeyboardInterrupt:
@@ -721,12 +729,17 @@ def main():
     # Print final metrics
     detector_metrics = detector.get_metrics()
     print("\n" + "=" * 60)
-    print("Final Metrics")
+    print("Detector Metrics")
     print("=" * 60)
     print(f"Total Frames:         {detector_metrics['frames_processed']}")
     print(f"Frames Dropped:       {detector_metrics['frames_dropped']}")
     print(f"Avg Inference Time:   {detector_metrics['avg_inference_time_ms']:.2f} ms")
     print(f"Workers Active:       {detector_metrics['workers_active']}")
+
+    # Print tracker metrics
+    import utils
+    tracker_metrics = tracker.get_metrics()
+    utils.print_tracker_metrics(tracker_metrics)
 
     # Get final line zone counts
     try:

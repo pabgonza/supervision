@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Iterable
 from typing import Any
 
@@ -91,6 +92,13 @@ class ByteTrackerStep:
             minimum_consecutive_frames=minimum_consecutive_frames,
         )
 
+        # Performance metrics
+        self._frames_processed = 0
+        self._total_processing_time = 0.0
+        self._min_processing_time = float("inf")
+        self._max_processing_time = 0.0
+        self._processing_times = []  # Keep last 100 frames for percentile calculations
+
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Track detections across frames.
@@ -106,17 +114,68 @@ class ByteTrackerStep:
         if detections is None or len(detections) == 0:
             return data
 
+        # Measure processing time
+        start_time = time.perf_counter()
+
         # Update tracker with detections
         tracked_detections = self.tracker.update_with_detections(detections)
 
+        # Calculate elapsed time
+        elapsed_time = time.perf_counter() - start_time
+
+        # Update metrics
+        self._frames_processed += 1
+        self._total_processing_time += elapsed_time
+        self._min_processing_time = min(self._min_processing_time, elapsed_time)
+        self._max_processing_time = max(self._max_processing_time, elapsed_time)
+        self._processing_times.append(elapsed_time)
+
+        # Keep only last 100 frames to avoid excessive memory usage
+        if len(self._processing_times) > 100:
+            self._processing_times.pop(0)
+
         # Update data with tracked detections
         data[self.detections_key] = tracked_detections
+
+        # Add tracking time to data dict for other steps to use
+        data["tracker_processing_time_ms"] = elapsed_time * 1000
 
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if detections exist."""
         return self.detections_key in data
+
+    def get_metrics(self) -> dict[str, Any]:
+        """
+        Get tracking performance metrics.
+
+        Returns:
+            Dictionary containing:
+            - frames_processed: Total number of frames processed
+            - avg_processing_time_ms: Average processing time in milliseconds
+            - min_processing_time_ms: Minimum processing time in milliseconds
+            - max_processing_time_ms: Maximum processing time in milliseconds
+            - total_processing_time_s: Total processing time in seconds
+        """
+        if self._frames_processed == 0:
+            return {
+                "frames_processed": 0,
+                "avg_processing_time_ms": 0.0,
+                "min_processing_time_ms": 0.0,
+                "max_processing_time_ms": 0.0,
+                "total_processing_time_s": 0.0,
+            }
+
+        avg_time = self._total_processing_time / self._frames_processed
+
+        return {
+            "frames_processed": self._frames_processed,
+            "avg_processing_time_ms": avg_time * 1000,
+            "min_processing_time_ms": self._min_processing_time * 1000,
+            "max_processing_time_ms": self._max_processing_time * 1000,
+            "total_processing_time_s": self._total_processing_time,
+        }
 
     def reset(self) -> None:
         """
@@ -126,6 +185,13 @@ class ByteTrackerStep:
         to restart tracking from scratch.
         """
         self.tracker.reset()
+
+        # Reset metrics
+        self._frames_processed = 0
+        self._total_processing_time = 0.0
+        self._min_processing_time = float("inf")
+        self._max_processing_time = 0.0
+        self._processing_times.clear()
 
 
 class LineZoneStep:

@@ -149,6 +149,9 @@ def main():
             reorder_buffer_size = len(detector._reorder_buffer) if hasattr(detector, '_reorder_buffer') else 0
             result_queue_size = detector._result_queue.qsize() if hasattr(detector, '_result_queue') else 0
 
+            # Get tracking time from current frame
+            tracking_time = data.get("tracker_processing_time_ms", 0.0)
+
             # Create metrics text
             lines = [
                 f"Workers: {metrics['workers_active']}",
@@ -162,6 +165,7 @@ def main():
                 f"Reorder Buffer: {reorder_buffer_size}",
                 f"Avg Inference: {metrics['avg_inference_time_ms']:.1f}ms",
                 f"Avg Queue Time: {metrics['avg_queue_time_ms']:.1f}ms",
+                f"Tracking: {tracking_time:.1f}ms",
             ]
 
             # Draw semi-transparent background
@@ -211,11 +215,15 @@ def main():
                     else 0
                 )
 
+                # Get tracking time from current frame
+                tracking_time = data.get("tracker_processing_time_ms", 0.0)
+
                 print(
                     f"Frame {frame_count:4d} | "
                     f"Detections: {len(detections):2d} | Tracked: {num_tracked:2d} | "
                     f"Queue: {detector_metrics['frames_reordered']:3d} reordered | "
-                    f"Inference: {detector_metrics['avg_inference_time_ms']:5.1f}ms"
+                    f"Inference: {detector_metrics['avg_inference_time_ms']:5.1f}ms | "
+                    f"Tracking: {tracking_time:5.1f}ms"
                 )
 
     except KeyboardInterrupt:
@@ -224,7 +232,7 @@ def main():
     # Print final metrics
     detector_metrics = detector.get_metrics()
     print("\n" + "=" * 60)
-    print("Final Metrics")
+    print("Detector Metrics")
     print("=" * 60)
     print(f"Total Frames:         {detector_metrics['frames_processed']}")
     print(f"Frames Dropped:       {detector_metrics['frames_dropped']}")
@@ -235,6 +243,10 @@ def main():
     print(f"Avg Reorder Delay:    {detector_metrics['avg_reorder_delay_ms']:.2f} ms")
     print(f"Workers Active:       {detector_metrics['workers_active']}")
     print("=" * 60)
+
+    # Print tracker metrics
+    tracker_metrics = tracker.get_metrics()
+    utils.print_tracker_metrics(tracker_metrics)
 
     # Why STRICT_ORDER matters
     if detector_metrics['frames_reordered'] == 0:
