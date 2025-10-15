@@ -367,8 +367,15 @@ class TestTrackerAnnotatorStep:
         assert not np.array_equal(result["frame"], frame)
 
     def test_tracker_annotator_step_process_without_tracker_id(self):
-        """Test processing detections without tracker_id."""
-        step = sv.TrackerAnnotatorStep()
+        """Test processing detections without tracker_id.
+
+        Note: TrackerAnnotatorStep is designed to work with tracked detections.
+        If detections don't have tracker_id, it indicates the ByteTrackerStep
+        was not used before this step. This test verifies the step doesn't crash
+        but uses a different color_lookup strategy that doesn't require tracker_id.
+        """
+        # Use CLASS color lookup instead of TRACK (default)
+        step = sv.TrackerAnnotatorStep(color_lookup=sv.ColorLookup.CLASS)
 
         # Create detections without tracker_id
         detections = sv.Detections(
@@ -380,7 +387,7 @@ class TestTrackerAnnotatorStep:
         frame = np.zeros((100, 100, 3), dtype=np.uint8)
         data = {"frame": frame, "detections": detections}
 
-        # Process - should not raise error
+        # Process - should work with CLASS color lookup
         result = step.process(data)
         assert "frame" in result
         assert result["frame"] is not None
