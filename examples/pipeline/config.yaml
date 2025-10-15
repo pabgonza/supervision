@@ -1,0 +1,65 @@
+# ROI-based Pool Detection + Line Zone Counter Configuration
+# ============================================================
+
+# Video Source Configuration
+# --------------------------
+source: stream  # Options: webcam, file, stream
+input: rtsp://192.168.18.169:554/live1s3.sdp  # URL for stream/file, null for webcam
+
+# Detection Model Configuration
+# -----------------------------
+model: D:/Trabajo/src/CV/ball_counter/models/ball_detector_yolov11n_v4n_rf.pt
+device: cuda  # cuda or cpu
+conf: 0.4  # Confidence threshold (0.0-1.0)
+
+# ROI (Region of Interest) Configuration
+# --------------------------------------
+# Defines the area where detection will be performed
+# If x or y is null, ROI will be centered on that axis
+roi:
+  x: null  # X coordinate of top-left corner (null = center horizontally)
+  y: null  # Y coordinate of top-left corner (null = center vertically)
+  width: 640   # ROI width in pixels
+  height: 640  # ROI height in pixels
+
+# Parallel Detection Pool Configuration
+# -------------------------------------
+pool_size: 4  # Number of parallel detector workers (2-8 recommended)
+queue_size: 10  # Maximum frames to queue for processing
+
+# Tracking Configuration
+# ----------------------
+# ByteTracker parameters for object tracking
+track_threshold: 0.25  # Track activation threshold (0.0-1.0)
+lost_buffer: 30  # Frames to buffer when track is lost
+match_threshold: 0.8  # Minimum matching threshold (0.0-1.0)
+
+# Line Zone Configuration
+# -----------------------
+# Line for counting object crossings
+# Format: "x,y" coordinates in full frame space (not ROI)
+line_start: "640,0"    # Start point of counting line
+line_end: "640,720"    # End point of counting line
+
+# Line Visualization
+# ------------------
+line_color: white  # Color name or hex (#RRGGBB)
+line_thickness: 4  # Line thickness in pixels
+
+# Custom count labels (optional)
+# in_text: "ENTRADA"   # Custom label for IN count
+# out_text: "SALIDA"   # Custom label for OUT count
+
+# Logging Configuration
+# ---------------------
+socket_port: 7777  # TCP port for real-time event streaming
+log_file: count.log  # Rotating log file path
+
+# Display Configuration
+# ---------------------
+show_metrics: true  # Show performance metrics overlay on frame
+# show_fps: false   # Show FPS counter (optional)
+
+# Output Configuration (optional)
+# -------------------------------
+# output: output.mp4  # Save processed video to file

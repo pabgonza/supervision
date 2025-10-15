@@ -1,0 +1,55 @@
+# ROI-based Pool Detection - Webcam Test Configuration
+# =====================================================
+# This configuration is for testing with a webcam on CPU
+
+# Video Source Configuration
+# --------------------------
+source: webcam  # Using default webcam
+input: null  # Not needed for webcam
+
+# Detection Model Configuration
+# -----------------------------
+model: D:/Trabajo/src/CV/supervision/yolov8n.pt  # Lightweight YOLO model
+device: cpu  # Using CPU for testing (change to cuda if GPU available)
+conf: 0.3  # Lower confidence for more detections during testing
+
+# ROI (Region of Interest) Configuration
+# --------------------------------------
+# Centered 640x640 ROI for webcam testing
+roi:
+  x: null  # Auto-center horizontally
+  y: null  # Auto-center vertically
+  width: 640   # Standard square ROI
+  height: 640
+
+# Parallel Detection Pool Configuration
+# -------------------------------------
+# Reduced pool size for CPU testing
+pool_size: 2  # Fewer workers for CPU
+queue_size: 10
+
+# Tracking Configuration
+# ----------------------
+track_threshold: 0.25
+lost_buffer: 30
+match_threshold: 0.8
+
+# Line Zone Configuration
+# -----------------------
+# Vertical line at center for webcam (640x480 typical)
+line_start: "320,0"
+line_end: "320,480"
+
+# Line Visualization
+# ------------------
+line_color: white
+line_thickness: 4
+
+# Logging Configuration
+# ---------------------
+socket_port: 7777
+log_file: count_test.log
+
+# Display Configuration
+# ---------------------
+show_metrics: true  # Show metrics for testing/debugging
