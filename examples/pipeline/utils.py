@@ -307,3 +307,112 @@ def get_tracker_step(pipeline) -> Optional[sv.ByteTrackerStep]:
             return step
 
     return None
+
+
+def parse_point(point_str: str) -> sv.Point:
+    """
+    Parse a Point from string format 'x,y'.
+
+    Args:
+        point_str: String in format "x,y" (e.g., "640,480")
+
+    Returns:
+        supervision Point object
+
+    Raises:
+        ValueError: If point format is invalid
+
+    Examples:
+        >>> parse_point("100,200")
+        Point(x=100, y=200)
+        >>> parse_point("0,720")
+        Point(x=0, y=720)
+    """
+    try:
+        x, y = map(int, point_str.split(","))
+        return sv.Point(x=x, y=y)
+    except Exception:
+        raise ValueError(f"Invalid point format: {point_str}. Expected 'x,y'")
+
+
+def parse_color(color_str: str) -> sv.Color:
+    """
+    Parse a Color from string (name or hex code).
+
+    Args:
+        color_str: Color name or hex code (e.g., "red", "#FF0000")
+
+    Returns:
+        supervision Color object
+
+    Raises:
+        ValueError: If color format is invalid
+
+    Supported color names:
+        - white, black, red, green, blue, yellow
+
+    Examples:
+        >>> parse_color("red")
+        Color(r=255, g=0, b=0)
+        >>> parse_color("#00FF00")
+        Color(r=0, g=255, b=0)
+    """
+    color_map = {
+        "white": sv.Color.WHITE,
+        "black": sv.Color.BLACK,
+        "red": sv.Color.RED,
+        "green": sv.Color.GREEN,
+        "blue": sv.Color.BLUE,
+        "yellow": sv.Color.YELLOW,
+    }
+
+    color_lower = color_str.lower()
+    if color_lower in color_map:
+        return color_map[color_lower]
+
+    # Try hex color
+    try:
+        if color_str.startswith("#"):
+            color_str = color_str[1:]
+        r = int(color_str[0:2], 16)
+        g = int(color_str[2:4], 16)
+        b = int(color_str[4:6], 16)
+        return sv.Color(r=r, g=g, b=b)
+    except Exception:
+        raise ValueError(
+            f"Invalid color: {color_str}. "
+            "Use color name (white, black, red, green, blue, yellow) "
+            "or hex code (#RRGGBB)"
+        )
+
+
+def create_line_extract_callback():
+    """
+    Create a callback function to extract line zone counts to data dict.
+
+    This is useful for logging line crossing counts with DebugLoggerStep or
+    other metrics collectors.
+
+    Returns:
+        Callback function that extracts line_in and line_out from line_zone
+
+    Examples:
+        >>> import supervision as sv
+        >>> callback = create_line_extract_callback()
+        >>> pipeline = (
+        ...     sv.Pipeline(source)
+        ...     | sv.LineZoneStep(start=start, end=end)
+        ...     | sv.CallbackStep(callback)  # Extract counts to data dict
+        ...     | sv.DebugLoggerStep(log_file="metrics.json",
+        ...                          custom_metrics=["line_in", "line_out"])
+        ... )
+    """
+    def extract_line_counts(data):
+        """Extract line crossing counts to data dict."""
+        line_zone = data.get("line_zone")
+        if line_zone:
+            data["line_in"] = line_zone.in_count
+            data["line_out"] = line_zone.out_count
+        return data
+
+    return extract_line_counts

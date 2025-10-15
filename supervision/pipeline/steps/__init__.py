@@ -7,6 +7,7 @@ from supervision.pipeline.steps.annotation import (
     TraceAnnotatorStep,
     TrackerAnnotatorStep,
 )
+from supervision.pipeline.steps.debug import DebugLoggerStep
 from supervision.pipeline.steps.detection import (
     AsyncDetectionStep,
     AsyncYOLODetectionStep,
@@ -53,4 +54,6 @@ __all__ = [
     "LabelFormatterStep",
     "ResizeStep",
     "TransformStep",
+    # Debug steps
+    "DebugLoggerStep",
 ]

@@ -123,6 +123,7 @@ from supervision.pipeline import (
     ByteTrackerStep,
     CallbackSink,
     CallbackStep,
+    DebugLoggerStep,
     DetectionFilterStep,
     DetectionStep,
     DetectionStrategy,
