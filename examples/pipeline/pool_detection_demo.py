@@ -109,7 +109,6 @@ def main():
         pool_size=args.pool_size,
         max_queue_size=args.queue_size,
         conf=args.conf,
-        device=args.device,
         warmup=True,
     )
 

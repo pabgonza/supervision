@@ -144,7 +144,6 @@ def run_single_strategy(
     detector = sv.AsyncYOLODetectionStep(
         model_path=model_path,
         conf=conf,
-        device=device,
         strategy=strategy,
         max_queue_size=10 if strategy == sv.DetectionStrategy.QUEUE_LATEST else 1,
         warmup=True,
@@ -237,7 +236,6 @@ def compare_strategies(
         detector = sv.AsyncYOLODetectionStep(
             model_path=model_path,
             conf=conf,
-            device=device,
             strategy=strategy,
             max_queue_size=2 if strategy == sv.DetectionStrategy.QUEUE_LATEST else 1,
             warmup=(len(detectors) == 0),  # Only warmup first detector

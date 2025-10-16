@@ -129,18 +129,19 @@ class YOLODetectionStep(DetectionStep):
         model_path: str,
         conf: float = 0.25,
         iou: float = 0.45,
-        device: str = "cuda",
         verbose: bool = False,
     ):
         """
         Initialize YOLO detection step.
 
         Args:
-            model_path: Path to YOLO model file (.pt)
+            model_path: Path to YOLO model file (.pt, .engine, etc.)
             conf: Confidence threshold for detections
             iou: IOU threshold for NMS
-            device: Device for inference ('cuda' or 'cpu')
             verbose: Whether to print verbose output
+
+        Note:
+            Ultralytics automatically detects and uses GPU if CUDA is available.
         """
         try:
             from ultralytics import YOLO
@@ -153,12 +154,10 @@ class YOLODetectionStep(DetectionStep):
         self.model_path = model_path
         self.conf = conf
         self.iou = iou
-        self.device = device
         self.verbose = verbose
 
-        # Load model
+        # Load model (device auto-detected by ultralytics)
         self.model = YOLO(model_path)
-        self.model.to(device)
 
     def _run_inference(self, frame: np.ndarray) -> Detections:
         """
@@ -221,8 +220,7 @@ class AsyncDetectionStep(ABC):
         # Create async detector with caching strategy
         detector = sv.AsyncYOLODetectionStep(
             model_path="yolov8n.pt",
-            strategy=sv.DetectionStrategy.USE_LAST_RESULT,
-            device="cuda"
+            strategy=sv.DetectionStrategy.USE_LAST_RESULT
         )
 
         pipeline = (
@@ -535,7 +533,7 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         # Basic async detection with default caching strategy
         pipeline = (
             sv.Pipeline(sv.WebcamSource())
-            | sv.AsyncYOLODetectionStep("yolov8n.pt", device="cuda")
+            | sv.AsyncYOLODetectionStep("yolov8n.pt")
             | sv.BoxAnnotatorStep()
             | sv.DisplaySink("Async YOLO")
         )
@@ -547,8 +545,7 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         detector = sv.AsyncYOLODetectionStep(
             model_path="yolov8n.pt",
             strategy=sv.DetectionStrategy.SKIP_WHEN_BUSY,
-            conf=0.5,
-            device="cuda"
+            conf=0.5
         )
 
         pipeline = (
@@ -572,8 +569,7 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         detector = sv.AsyncYOLODetectionStep(
             model_path="yolov8n.pt",
             strategy=sv.DetectionStrategy.QUEUE_LATEST,
-            max_queue_size=5,
-            device="cuda"
+            max_queue_size=5
         )
         ```
     """
@@ -583,7 +579,6 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         model_path: str,
         conf: float = 0.25,
         iou: float = 0.45,
-        device: str = "cuda",
         verbose: bool = False,
         strategy: DetectionStrategy = DetectionStrategy.USE_LAST_RESULT,
         max_queue_size: int = 2,
@@ -594,15 +589,17 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         Initialize async YOLO detection step.
 
         Args:
-            model_path: Path to YOLO model file (.pt)
+            model_path: Path to YOLO model file (.pt, .engine, etc.)
             conf: Confidence threshold for detections (0.0-1.0)
             iou: IOU threshold for NMS (0.0-1.0)
-            device: Device for inference ('cuda' or 'cpu')
             verbose: Whether to print verbose YOLO output
             strategy: Detection strategy for handling slow inference
             max_queue_size: Maximum frames to queue (lower = less latency)
             inference_timeout: Maximum time to wait for results (seconds)
             warmup: Whether to run warmup inference on model load
+
+        Note:
+            Ultralytics automatically detects and uses GPU if CUDA is available.
         """
         try:
             from ultralytics import YOLO
@@ -623,12 +620,10 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         self.model_path = model_path
         self.conf = conf
         self.iou = iou
-        self.device = device
         self.verbose = verbose
 
-        # Load model
+        # Load model (device auto-detected by ultralytics)
         self.model = YOLO(model_path)
-        self.model.to(device)
 
         # Warmup model
         if warmup:
@@ -700,8 +695,7 @@ class PoolDetectorStep(ABC):
         detector = sv.PoolYOLODetectionStep(
             model_path="yolov8n.pt",
             pool_size=3,
-            max_queue_size=10,
-            device="cuda"
+            max_queue_size=10
         )
 
         pipeline = (
@@ -1075,8 +1069,7 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             sv.Pipeline(sv.VideoFileSource("video.mp4"))
             | sv.PoolYOLODetectionStep(
                 model_path="yolov8n.pt",
-                pool_size=3,
-                device="cuda"
+                pool_size=3
             )
             | sv.BoxAnnotatorStep()
             | sv.DisplaySink("Pool Detection")
@@ -1091,8 +1084,7 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             pool_size=4,
             max_queue_size=20,
             reorder_timeout=2.0,
-            conf=0.5,
-            device="cuda"
+            conf=0.5
         )
 
         pipeline = (
@@ -1117,7 +1109,6 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         pool_size: int = 2,
         conf: float = 0.25,
         iou: float = 0.45,
-        device: str = "cuda",
         verbose: bool = False,
         max_queue_size: int = 10,
         reorder_timeout: float = 1.0,
@@ -1127,16 +1118,18 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         Initialize pool YOLO detection step.
 
         Args:
-            model_path: Path to YOLO model file (.pt)
+            model_path: Path to YOLO model file (.pt, .engine, etc.)
             pool_size: Number of parallel detector workers (default: 2)
             conf: Confidence threshold for detections (0.0-1.0)
             iou: IOU threshold for NMS (0.0-1.0)
-            device: Device for inference ('cuda' or 'cpu')
             verbose: Whether to print verbose YOLO output
             max_queue_size: Maximum frames to queue (default: 10)
             reorder_timeout: Maximum time to wait for expected frame (seconds).
                 Frames are always returned in strict order.
             warmup: Whether to run warmup inference on each model
+
+        Note:
+            Ultralytics automatically detects and uses GPU if CUDA is available.
         """
         try:
             from ultralytics import YOLO
@@ -1157,14 +1150,12 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         self.model_path = model_path
         self.conf = conf
         self.iou = iou
-        self.device = device
         self.verbose = verbose
 
-        # Create one model per worker
+        # Create one model per worker (device auto-detected by ultralytics)
         self._models: list = []
         for i in range(pool_size):
             model = YOLO(model_path)
-            model.to(device)
             self._models.append(model)
 
             # Warmup model

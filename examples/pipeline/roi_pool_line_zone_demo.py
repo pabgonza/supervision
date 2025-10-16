@@ -537,7 +537,6 @@ def main():
     detector = sv.PoolYOLODetectionStep(
         model_path=config["model"],
         pool_size=config["pool_size"],
-        device=config["device"],
         conf=config["conf"],
         max_queue_size=config.get("queue_size", 10),
         warmup=True,

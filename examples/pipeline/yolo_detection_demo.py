@@ -107,7 +107,6 @@ def main():
             model_path=args.model,
             conf=args.conf,
             iou=args.iou,
-            device=args.device,
             verbose=False,
         )
         | sv.BoxAnnotatorStep()

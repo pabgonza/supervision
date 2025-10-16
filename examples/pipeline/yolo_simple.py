@@ -93,7 +93,7 @@ def main():
     # Add detection and annotation
     pipeline = (
         pipeline
-        | sv.YOLODetectionStep(args.model, conf=args.conf, device=args.device)
+        | sv.YOLODetectionStep(args.model, conf=args.conf)
         | sv.BoxAnnotatorStep()
     )
 

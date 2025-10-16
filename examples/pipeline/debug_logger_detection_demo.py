@@ -155,7 +155,6 @@ def main():
     yolo_step = sv.YOLODetectionStep(
         model_path=args.model,
         conf=args.conf,
-        device=args.device,
     )
 
     pipeline = (
