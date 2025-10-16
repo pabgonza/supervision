@@ -34,6 +34,22 @@ The calibration process determines:
   - `k1`, `k2`, `k3`: Radial distortion coefficients
   - `p1`, `p2`: Tangential distortion coefficients
 
+### Lens Types: Standard vs Fisheye
+
+**Standard Lenses (FOV < 180°):**
+- Normal and wide-angle lenses
+- Use standard pinhole calibration model (`cv2.calibrateCamera`)
+- 5 distortion coefficients: k1, k2, p1, p2, k3
+- Best for most cameras including webcams and smartphone cameras
+
+**Fisheye Lenses (FOV >= 180°):**
+- Ultra-wide angle lenses with extreme distortion
+- Require fisheye-specific calibration model (`cv2.fisheye.calibrate`)
+- 4 distortion coefficients: k1, k2, k3, k4
+- Essential for 360° cameras, action cameras, and security cameras with fisheye lenses
+
+**How to choose:** If straight lines near image edges appear extremely curved (barrel distortion), you likely have a fisheye lens. Use `--fisheye` flag for calibration.
+
 ## Requirements
 
 ```bash
@@ -93,7 +109,7 @@ calibration_images/
 
 ## Usage
 
-### Basic Calibration
+### Basic Calibration (Standard Lens)
 
 ```bash
 python calibrate_camera.py \
@@ -101,6 +117,19 @@ python calibrate_camera.py \
     --width 9 \
     --height 6 \
     --output camera_calibration.json
+```
+
+### Fisheye Lens Calibration (FOV >= 180°)
+
+For fisheye lenses with field of view >= 180°, use the `--fisheye` flag:
+
+```bash
+python calibrate_camera.py \
+    --images ./calibration_images \
+    --width 9 \
+    --height 6 \
+    --fisheye \
+    --output fisheye_calibration.json
 ```
 
 ### Arguments
@@ -112,6 +141,8 @@ python calibrate_camera.py \
 - `--output`: Output JSON file for calibration coefficients (default: camera_calibration.json)
 - `--show-corners`: Display detected corners during processing
 - `--test-image`: Test calibration on a specific image
+- `--fisheye`: Use fisheye calibration model for lenses with FOV >= 180°
+- `--balance`: Balance/alpha parameter for undistortion (0.0=minimal black pixels, 1.0=retain all pixels)
 
 ### Example with Visualization
 
@@ -123,6 +154,39 @@ python calibrate_camera.py \
     --show-corners \
     --test-image ./calibration_images/img_001.jpg \
     --output my_camera.json
+```
+
+### Minimizing Pixel Loss with Balance/Alpha Parameter
+
+The `--balance` parameter controls the trade-off between retaining pixels and eliminating black borders:
+
+**For Standard Lenses (mapped to alpha parameter):**
+- `--balance 0.0` (default): Returns image without black pixels but crops corners (minimal black borders)
+- `--balance 1.0`: Retains ALL original pixels but introduces black areas in corners (minimal information loss)
+- `--balance 0.8-0.95`: Good compromise between the two
+
+**For Fisheye Lenses:**
+- `--balance 0.0` (default): Minimal black pixels in output
+- `--balance 1.0`: Retains all source pixels with black borders (minimal pixel loss)
+
+Example with minimal pixel loss:
+```bash
+# Standard lens - retain all pixels
+python calibrate_camera.py \
+    --images ./calibration_images \
+    --width 9 \
+    --height 6 \
+    --test-image test.jpg \
+    --balance 1.0
+
+# Fisheye lens - retain all pixels
+python calibrate_camera.py \
+    --images ./calibration_images \
+    --width 9 \
+    --height 6 \
+    --fisheye \
+    --test-image test.jpg \
+    --balance 1.0
 ```
 
 ## Step-by-Step Procedure
@@ -195,7 +259,47 @@ python calibrate_camera.py \
 
 ## Using Calibration Results
 
-### Load Calibration
+### Batch Undistort Images with undistort_images.py
+
+After calibration, you can undistort multiple images at once:
+
+```bash
+# Basic usage
+python undistort_images.py \
+    --images ./my_images \
+    --camera_coefs camera_calibration.json \
+    --output ./undistorted_images
+
+# With cropping to remove black borders
+python undistort_images.py \
+    --images ./my_images \
+    --camera_coefs camera_calibration.json \
+    --output ./undistorted_images \
+    --crop
+
+# With minimal pixel loss (retain all pixels)
+python undistort_images.py \
+    --images ./my_images \
+    --camera_coefs camera_calibration.json \
+    --output ./undistorted_images \
+    --balance 1.0
+
+# Fisheye undistortion (automatically detected from calibration file)
+python undistort_images.py \
+    --images ./my_fisheye_images \
+    --camera_coefs fisheye_calibration.json \
+    --output ./undistorted_fisheye \
+    --balance 1.0
+```
+
+**Arguments for undistort_images.py:**
+- `--images`: Directory containing images to undistort (required)
+- `--camera_coefs`: Calibration JSON file (default: camera_calibration.json)
+- `--output`: Output directory for undistorted images (default: undistorted_images)
+- `--crop`: Crop black borders from undistorted images
+- `--balance`: Balance/alpha parameter (0.0=minimal black pixels, 1.0=retain all pixels)
+
+### Load Calibration Programmatically
 
 ```python
 from calibrate_camera import CameraCoefficients, undistort_image
@@ -341,8 +445,16 @@ sv.process_video(
 ## References
 
 - [OpenCV Camera Calibration Tutorial](https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html)
+- [LearnOpenCV Camera Calibration Tutorial](https://learnopencv.com/understanding-lens-distortion/)
+- [LearnOpenCV Lens Distortion Tutorial](https://learnopencv.com/camera-calibration-using-opencv/)
+- [Camera Calibration with Python - OpenCV](https://www.geeksforgeeks.org/python/camera-calibration-with-python-opencv/)
 - [OpenCV Calibration Pattern](https://github.com/opencv/opencv/blob/4.x/doc/pattern.png)
 - [Roboflow Inference Examples](https://github.com/roboflow/inference/tree/main/examples/camera-calibration)
+
+
+
+
+
 
 ## Advanced Usage
 
@@ -391,6 +503,7 @@ undistorted = undistort_image(image, coeffs, crop=True)
 
 The calibration is saved as JSON:
 
+**Standard Lens:**
 ```json
 {
   "fx": 1423.45,
@@ -404,6 +517,231 @@ The calibration is saved as JSON:
   "k3": -0.012345,
   "width": 1920,
   "height": 1080,
-  "error": 0.234567
+  "error": 0.234567,
+  "is_fisheye": false
 }
 ```
+
+**Fisheye Lens:**
+```json
+{
+  "fx": 1423.45,
+  "fy": 1421.89,
+  "cx": 960.12,
+  "cy": 540.34,
+  "k1": -0.341234,
+  "k2": 0.123456,
+  "p1": 0.001234,
+  "p2": -0.000567,
+  "k3": 0.0,
+  "width": 1920,
+  "height": 1080,
+  "error": 0.234567,
+  "is_fisheye": true
+}
+```
+
+Note: For fisheye lenses, the distortion model uses 4 coefficients (k1, k2, p1, p2) instead of the standard 5 coefficients. The k3 field is set to 0.0 for fisheye calibrations.
+
+## Measurement and Real-World Distances
+
+When you calibrate with `--square-size` in real units (e.g., mm), you can measure real-world distances in undistorted images. However, **you need to know the depth (distance from camera to object)** to convert pixels to real measurements.
+
+### Quick Start: Interactive Measurement Tool
+
+Try the included measurement tool for interactive measurements:
+
+```bash
+# Using known distance
+python measure_example.py \
+    --camera_coefs camera_calibration.json \
+    --image test.jpg \
+    --distance 500
+
+# Using reference object (interactive - you click two points on the reference)
+python measure_example.py \
+    --camera_coefs camera_calibration.json \
+    --image test.jpg \
+    --reference-real 24.4
+```
+
+**How it works:**
+1. **With `--reference-real`**: First, you click two points on a reference object (e.g., a checkerboard square of known size). The tool calculates the scale, then you can measure anything in the same plane.
+2. **With `--distance`**: You measure directly, knowing the distance from camera to objects.
+3. The tool allows you to click two points to measure distances (works at any orientation, not just horizontal/vertical).
+
+### Understanding the Relationship
+
+The fundamental equation relating pixel size to real-world size is:
+
+```
+real_size = (pixel_size × distance_from_camera) / focal_length
+```
+
+Where:
+- `real_size`: Size in real-world units (mm, cm, etc.)
+- `pixel_size`: Size in pixels
+- `distance_from_camera`: Depth/distance to object (in same units as square_size)
+- `focal_length`: Camera focal length in pixels (fx for horizontal, fy for vertical)
+
+### Method 1: Known Distance (Direct Measurement)
+
+If you know the distance from the camera to the object:
+
+```python
+from calibrate_camera import CameraCoefficients, pixels_to_real_size, calculate_pixel_size
+
+# Load calibration
+coeffs = CameraCoefficients.load("camera_calibration.json")
+
+# Example: Measuring an object 500mm away from the camera
+distance_mm = 500
+
+# Option A: Calculate pixel size at this distance
+pixel_w, pixel_h = calculate_pixel_size(coeffs, distance_mm)
+print(f"At {distance_mm}mm: 1 pixel = {pixel_w:.3f}mm × {pixel_h:.3f}mm")
+
+# If object is 100 pixels wide:
+width_pixels = 100
+real_width_mm = width_pixels * pixel_w
+print(f"Object width: {real_width_mm:.2f}mm")
+
+# Option B: Direct conversion
+real_width = pixels_to_real_size(100, coeffs, distance_mm, "horizontal")
+real_height = pixels_to_real_size(80, coeffs, distance_mm, "vertical")
+print(f"Object size: {real_width:.2f}mm × {real_height:.2f}mm")
+```
+
+### Method 2: Reference Object (Unknown Distance)
+
+If you have a reference object of known size in the same plane as what you want to measure:
+
+```python
+import numpy as np
+from calibrate_camera import calculate_scale_from_reference
+
+# You know a marker in the image is 50mm, measure it by clicking two points
+# (or calculate distance between two pixel coordinates)
+point1 = (100, 200)  # First point of reference object
+point2 = (220, 200)  # Second point of reference object
+
+# Calculate pixel distance (works at any orientation)
+reference_pixels = np.linalg.norm(np.array(point2) - np.array(point1))
+reference_mm = 50
+
+# Calculate scale factor (mm per pixel at this depth)
+scale = calculate_scale_from_reference(reference_pixels, reference_mm)
+print(f"Scale: {scale:.4f} mm/pixel")
+
+# Now measure unknown objects at the same depth
+unknown_width_pixels = 200
+unknown_width_mm = unknown_width_pixels * scale
+print(f"Unknown object width: {unknown_width_mm:.2f}mm")
+```
+
+### Method 3: Estimate Distance from Known Object
+
+If you see an object of known size, you can estimate its distance:
+
+```python
+from calibrate_camera import estimate_distance_from_known_object
+
+# You see a person (1700mm tall) that appears as 400 pixels in the image
+person_height_pixels = 400
+person_real_height_mm = 1700
+
+distance = estimate_distance_from_known_object(
+    person_height_pixels,
+    person_real_height_mm,
+    coeffs
+)
+print(f"Person is approximately {distance:.0f}mm ({distance/1000:.1f}m) away")
+
+# Now you can measure other objects at approximately the same distance
+car_width_pixels = 350
+car_width_mm = pixels_to_real_size(car_width_pixels, coeffs, distance, "horizontal")
+print(f"Car width: {car_width_mm:.0f}mm ({car_width_mm/1000:.2f}m)")
+```
+
+### Important Considerations
+
+1. **Depth Dependency**: Measurements are only accurate if you know the distance from camera to object. Objects at different depths require different calculations.
+
+2. **Undistorted Images**: Always undistort the image first before measuring, otherwise lens distortion will affect measurements.
+
+3. **Same Plane**: The reference object method works best when measuring objects in the same plane (same distance from camera).
+
+4. **Perspective**: Measurements are most accurate when:
+   - Objects are perpendicular to the camera axis
+   - Objects are near the center of the image
+   - Camera is properly calibrated
+
+5. **Units Consistency**: Use the same units throughout (if you calibrated with mm, all distances should be in mm).
+
+### Complete Measurement Example
+
+```python
+import cv2
+import numpy as np
+from calibrate_camera import (
+    CameraCoefficients,
+    undistort_image,
+    calculate_scale_from_reference,
+    pixels_to_real_size
+)
+
+# Load calibration (calibrated with square_size=24.4mm)
+coeffs = CameraCoefficients.load("camera_calibration.json")
+
+# Load and undistort image
+image = cv2.imread("scene.jpg")
+undistorted = undistort_image(image, coeffs, crop=False, balance=1.0)
+
+# Scenario: You have a checkerboard in the scene as reference
+# You know one square is 24.4mm, and it measures 30 pixels in the undistorted image
+reference_square_pixels = 30
+reference_square_mm = 24.4
+
+# Calculate scale for this scene
+scale = calculate_scale_from_reference(reference_square_pixels, reference_square_mm)
+print(f"Scale: {scale:.4f} mm/pixel")
+
+# Now measure objects in the same plane as the checkerboard
+# Example: Measure distance between two points
+point1 = (100, 200)  # pixel coordinates in undistorted image
+point2 = (350, 200)  # pixel coordinates in undistorted image
+
+# Calculate pixel distance
+pixel_distance = np.linalg.norm(np.array(point2) - np.array(point1))
+real_distance_mm = pixel_distance * scale
+
+print(f"Distance: {pixel_distance:.1f} pixels = {real_distance_mm:.2f}mm")
+
+# Measure object dimensions
+# Example: Bounding box of object
+bbox = (150, 180, 250, 280)  # x1, y1, x2, y2
+width_pixels = bbox[2] - bbox[0]
+height_pixels = bbox[3] - bbox[1]
+
+width_mm = width_pixels * scale
+height_mm = height_pixels * scale
+
+print(f"Object size: {width_mm:.2f}mm × {height_mm:.2f}mm")
+
+# Visualize
+cv2.rectangle(undistorted, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
+cv2.putText(undistorted, f"{width_mm:.1f}mm x {height_mm:.1f}mm",
+            (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+cv2.imshow("Measurement", undistorted)
+cv2.waitKey(0)
+```
+
+### Advanced: Ground Plane Measurements
+
+For measuring objects on a ground plane (like in traffic monitoring):
+
+1. **Calibrate with known distance**: Place the calibration pattern on the ground at a known distance
+2. **Use homography**: Calculate a homography transformation from image plane to ground plane
+3. **Bird's eye view**: Transform the image to a top-down view where measurements are uniform
+
+This requires additional geometric calculations and is beyond basic calibration, but the calibration data you have is the foundation for these advanced techniques.
