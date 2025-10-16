@@ -34,6 +34,7 @@ class DetectionStep(ABC):
         # Implement custom detection step
         class CustomDetectionStep(sv.DetectionStep):
             def __init__(self, model):
+                super().__init__()
                 self.model = model
 
             def _run_inference(self, frame: np.ndarray) -> sv.Detections:
@@ -65,6 +66,17 @@ class DetectionStep(ABC):
         ```
     """
 
+    def __init__(self, input_key: str = "frame", output_key: str = "detections"):
+        """
+        Initialize detection step.
+
+        Args:
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
+        """
+        self.input_key = input_key
+        self.output_key = output_key
+
     @abstractmethod
     def _run_inference(self, frame: np.ndarray) -> Detections:
         """
@@ -83,24 +95,24 @@ class DetectionStep(ABC):
         Process frame with object detection.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing input frame
 
         Returns:
-            Data with 'detections' field added
+            Data with detections field added
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return data
 
         # Run inference
         detections = self._run_inference(frame)
-        data["detections"] = detections
+        data[self.output_key] = detections
 
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
 
 class YOLODetectionStep(DetectionStep):
@@ -130,6 +142,8 @@ class YOLODetectionStep(DetectionStep):
         conf: float = 0.25,
         iou: float = 0.45,
         verbose: bool = False,
+        input_key: str = "frame",
+        output_key: str = "detections",
     ):
         """
         Initialize YOLO detection step.
@@ -139,10 +153,14 @@ class YOLODetectionStep(DetectionStep):
             conf: Confidence threshold for detections
             iou: IOU threshold for NMS
             verbose: Whether to print verbose output
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
         """
+        super().__init__(input_key=input_key, output_key=output_key)
+
         try:
             from ultralytics import YOLO
         except ImportError:
@@ -243,6 +261,8 @@ class AsyncDetectionStep(ABC):
         strategy: DetectionStrategy = DetectionStrategy.USE_LAST_RESULT,
         max_queue_size: int = 2,
         inference_timeout: float = 0.5,
+        input_key: str = "frame",
+        output_key: str = "detections",
     ):
         """
         Initialize async detection step.
@@ -251,10 +271,14 @@ class AsyncDetectionStep(ABC):
             strategy: Strategy for handling timing mismatch between detector and source
             max_queue_size: Maximum frames to queue for processing (lower = less latency)
             inference_timeout: Maximum time to wait for inference results (seconds)
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
         """
         self.strategy = strategy
         self.max_queue_size = max_queue_size
         self.inference_timeout = inference_timeout
+        self.input_key = input_key
+        self.output_key = output_key
 
         # Threading components
         self._inference_queue: Queue = Queue(maxsize=max_queue_size)
@@ -412,12 +436,12 @@ class AsyncDetectionStep(ABC):
         """
         with self._result_lock:
             if self._last_detections is not None and self._last_frame is not None:
-                data["detections"] = self._last_detections
-                data["frame"] = self._last_frame
+                data[self.output_key] = self._last_detections
+                data[self.input_key] = self._last_frame
                 self._metrics["frames_cached"] += 1
             else:
                 # No cached result yet, return empty detections
-                data["detections"] = Detections.empty()
+                data[self.output_key] = Detections.empty()
 
         return data
 
@@ -426,12 +450,12 @@ class AsyncDetectionStep(ABC):
         Process frame according to selected strategy.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing input frame
 
         Returns:
-            Data with 'detections' field added
+            Data with detections field added
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return data
 
@@ -445,7 +469,7 @@ class AsyncDetectionStep(ABC):
             detections = self._run_inference(frame)
             inference_time_ms = (time.time() - start_time) * 1000
 
-            data["detections"] = detections
+            data[self.output_key] = detections
             with self._result_lock:
                 self._metrics["frames_processed"] += 1
                 self._metrics["total_inference_time_ms"] += inference_time_ms
@@ -480,7 +504,7 @@ class AsyncDetectionStep(ABC):
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
     def get_metrics(self) -> dict[str, Any]:
         """
@@ -584,6 +608,8 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
         max_queue_size: int = 2,
         inference_timeout: float = 0.5,
         warmup: bool = True,
+        input_key: str = "frame",
+        output_key: str = "detections",
     ):
         """
         Initialize async YOLO detection step.
@@ -597,6 +623,8 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
             max_queue_size: Maximum frames to queue (lower = less latency)
             inference_timeout: Maximum time to wait for results (seconds)
             warmup: Whether to run warmup inference on model load
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
@@ -614,6 +642,8 @@ class AsyncYOLODetectionStep(AsyncDetectionStep):
             strategy=strategy,
             max_queue_size=max_queue_size,
             inference_timeout=inference_timeout,
+            input_key=input_key,
+            output_key=output_key,
         )
 
         # YOLO parameters
@@ -718,6 +748,8 @@ class PoolDetectorStep(ABC):
         pool_size: int = 2,
         max_queue_size: int = 10,
         reorder_timeout: float = 1.0,
+        input_key: str = "frame",
+        output_key: str = "detections",
     ):
         """
         Initialize pool detector step.
@@ -728,10 +760,14 @@ class PoolDetectorStep(ABC):
             reorder_timeout: Maximum time to wait for expected frame (seconds).
                 Frames are always returned in strict order. If the expected frame
                 is not available within this timeout, empty detections are returned.
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
         """
         self.pool_size = pool_size
         self.max_queue_size = max_queue_size
         self.reorder_timeout = reorder_timeout
+        self.input_key = input_key
+        self.output_key = output_key
 
         # Threading components
         self._frame_queue: Queue = Queue(maxsize=max_queue_size)
@@ -923,14 +959,14 @@ class PoolDetectorStep(ABC):
         Process frame using the detector pool.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing input frame
 
         Returns:
-            Data with 'detections' field added. The returned frame is the
+            Data with detections field added. The returned frame is the
             one that was actually processed (may be slightly delayed to
             maintain order).
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return data
 
@@ -953,7 +989,7 @@ class PoolDetectorStep(ABC):
                 self._metrics["queue_full_count"] += 1
                 self._metrics["frames_dropped"] += 1
             # Return data with empty detections
-            data["detections"] = Detections.empty()
+            data[self.output_key] = Detections.empty()
             return data
 
         # Get next ordered result
@@ -976,8 +1012,8 @@ class PoolDetectorStep(ABC):
             inference_time_ms = inference_time * 1000
 
             # Update data
-            data["detections"] = detections
-            data["frame"] = processed_frame
+            data[self.output_key] = detections
+            data[self.input_key] = processed_frame
             data["sequence_number"] = seq_num
 
             # Update metrics
@@ -1001,13 +1037,13 @@ class PoolDetectorStep(ABC):
                 )
         else:
             # Timeout - return empty detections
-            data["detections"] = Detections.empty()
+            data[self.output_key] = Detections.empty()
 
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
     def get_metrics(self) -> dict[str, Any]:
         """
@@ -1113,6 +1149,8 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         max_queue_size: int = 10,
         reorder_timeout: float = 1.0,
         warmup: bool = True,
+        input_key: str = "frame",
+        output_key: str = "detections",
     ):
         """
         Initialize pool YOLO detection step.
@@ -1127,6 +1165,8 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             reorder_timeout: Maximum time to wait for expected frame (seconds).
                 Frames are always returned in strict order.
             warmup: Whether to run warmup inference on each model
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
@@ -1144,6 +1184,8 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             pool_size=pool_size,
             max_queue_size=max_queue_size,
             reorder_timeout=reorder_timeout,
+            input_key=input_key,
+            output_key=output_key,
         )
 
         # YOLO parameters
