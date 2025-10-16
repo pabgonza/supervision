@@ -158,6 +158,8 @@ class ResizeStep:
         width: int | None = None,
         height: int | None = None,
         keep_aspect_ratio: bool = True,
+        input_key: str = "frame",
+        output_key: str = "frame",
     ):
         """
         Initialize resize step.
@@ -166,22 +168,26 @@ class ResizeStep:
             width: Target width (None to auto-calculate)
             height: Target height (None to auto-calculate)
             keep_aspect_ratio: Whether to maintain aspect ratio
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store resized frame (default: 'frame')
         """
         self.width = width
         self.height = height
         self.keep_aspect_ratio = keep_aspect_ratio
+        self.input_key = input_key
+        self.output_key = output_key
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """
         Resize frame.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing input frame
 
         Returns:
             Data with resized frame
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return data
 
@@ -191,12 +197,12 @@ class ResizeStep:
             keep_aspect_ratio=self.keep_aspect_ratio,
         )
 
-        data["frame"] = resized
+        data[self.output_key] = resized
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
 
 class DetectionFilterStep:

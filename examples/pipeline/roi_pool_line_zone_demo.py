@@ -81,6 +81,8 @@ class ROIExtractionStep:
         y: int | None = None,
         width: int = 640,
         height: int = 640,
+        input_key: str = "frame",
+        output_key: str = "roi_frame",
     ):
         """
         Initialize ROI extraction step.
@@ -90,22 +92,23 @@ class ROIExtractionStep:
             y: Y coordinate of ROI top-left corner (None = center vertically)
             width: Width of ROI (default: 640)
             height: Height of ROI (default: 640)
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store ROI frame (default: 'roi_frame')
         """
         self.x = x
         self.y = y
         self.width = width
         self.height = height
+        self.input_key = input_key
+        self.output_key = output_key
         self.roi_x = 0
         self.roi_y = 0
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """Extract ROI from frame."""
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return data
-
-        # Store original frame
-        data["original_frame"] = frame
 
         # Calculate ROI coordinates
         h, w = frame.shape[:2]
@@ -128,16 +131,16 @@ class ROIExtractionStep:
         # Extract ROI
         roi = frame[self.roi_y : roi_y_end, self.roi_x : roi_x_end]
 
-        # Store ROI coordinates and replace frame with ROI
+        # Store ROI coordinates and ROI frame
         data["roi_offset"] = (self.roi_x, self.roi_y)
         data["roi_size"] = (roi.shape[1], roi.shape[0])  # (width, height)
-        data["frame"] = roi
+        data[self.output_key] = roi
 
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Always process."""
-        return True
+        return self.input_key in data
 
 
 class CoordinateTranslationStep:
@@ -148,37 +151,43 @@ class CoordinateTranslationStep:
     back to original frame coordinates.
     """
 
-    def __init__(self, detections_key: str = "detections"):
+    def __init__(
+        self,
+        input_key: str = "roi_detections",
+        output_key: str = "detections",
+    ):
         """
         Initialize coordinate translation step.
 
         Args:
-            detections_key: Key in data dict containing Detections object
+            input_key: Key in data dict containing ROI detections (default: 'roi_detections')
+            output_key: Key to store translated detections (default: 'detections')
         """
-        self.detections_key = detections_key
+        self.input_key = input_key
+        self.output_key = output_key
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """Translate detection coordinates from ROI to full frame."""
-        detections = data.get(self.detections_key)
+        detections = data.get(self.input_key)
         roi_offset = data.get("roi_offset")
 
         if detections is None or roi_offset is None or len(detections) == 0:
+            if detections is not None:
+                data[self.output_key] = detections
             return data
 
         roi_x, roi_y = roi_offset
 
+        # Create a copy to avoid modifying the original
+        import copy
+        translated_detections = copy.deepcopy(detections)
+
         # Translate bounding boxes
-        if detections.xyxy is not None:
-            detections.xyxy[:, [0, 2]] += roi_x  # x coordinates
-            detections.xyxy[:, [1, 3]] += roi_y  # y coordinates
+        if translated_detections.xyxy is not None:
+            translated_detections.xyxy[:, [0, 2]] += roi_x  # x coordinates
+            translated_detections.xyxy[:, [1, 3]] += roi_y  # y coordinates
 
-        # Translate masks if present
-        if detections.mask is not None:
-            # This would require more complex mask translation
-            # For now, we just note that masks are in ROI coordinates
-            pass
-
-        data[self.detections_key] = detections
+        data[self.output_key] = translated_detections
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
@@ -188,9 +197,9 @@ class CoordinateTranslationStep:
 
 class ROIVisualizationStep:
     """
-    Pipeline step to draw ROI rectangle on original frame.
+    Pipeline step to draw ROI rectangle on frame.
 
-    Draws a cyan rectangle showing the ROI area on the original full frame.
+    Draws a rectangle showing the ROI area on the full frame.
     """
 
     def __init__(self, color: tuple = (255, 255, 0), thickness: int = 2):
@@ -208,43 +217,22 @@ class ROIVisualizationStep:
         """Draw ROI rectangle on frame."""
         frame = data.get("frame")
         roi_offset = data.get("roi_offset")
-        original_frame = data.get("original_frame")
+        roi_size = data.get("roi_size")
 
-        if frame is None or roi_offset is None or original_frame is None:
+        if frame is None or roi_offset is None or roi_size is None:
             return data
 
         roi_x, roi_y = roi_offset
-        roi_h, roi_w = frame.shape[:2]
+        roi_w, roi_h = roi_size
 
-        # Draw ROI rectangle on original frame
+        # Draw ROI rectangle on frame
         cv2.rectangle(
-            original_frame,
+            frame,
             (roi_x, roi_y),
             (roi_x + roi_w, roi_y + roi_h),
             self.color,
             self.thickness,
         )
-
-        return data
-
-    def filter(self, data: dict[str, Any]) -> bool:
-        """Always process."""
-        return True
-
-
-class FrameRestoreStep:
-    """
-    Pipeline step to restore original frame for annotation.
-
-    Replaces the ROI frame with the original full frame so annotations
-    are drawn on the full frame with translated coordinates.
-    """
-
-    def process(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Restore original frame."""
-        original_frame = data.get("original_frame")
-        if original_frame is not None:
-            data["frame"] = original_frame
 
         return data
 
@@ -524,47 +512,53 @@ def main():
 
     # Create pipeline steps
 
-    # 1. ROI extraction step
+    # 1. ROI extraction step (extracts ROI to 'roi_frame' key)
     roi_config = config.get("roi", {})
     roi_step = ROIExtractionStep(
         x=roi_config.get("x"),
         y=roi_config.get("y"),
         width=roi_config.get("width", 640),
         height=roi_config.get("height", 640),
+        input_key="frame",
+        output_key="roi_frame",
     )
 
-    # 2. Pool detector (operates on ROI)
+    # 2. Pool detector (operates on ROI frame, outputs to 'roi_detections')
     detector = sv.PoolYOLODetectionStep(
         model_path=config["model"],
         pool_size=config["pool_size"],
         conf=config["conf"],
         max_queue_size=config.get("queue_size", 10),
         warmup=True,
+        input_key="roi_frame",
+        output_key="roi_detections",
     )
 
-    # 3. Coordinate translation step (ROI -> full frame)
-    coord_translate = CoordinateTranslationStep()
+    # 3. Coordinate translation step (translates ROI detections to full frame)
+    coord_translate = CoordinateTranslationStep(
+        input_key="roi_detections",
+        output_key="detections",
+    )
 
     # 4. Tracker (requires frames in order!)
     tracker = sv.ByteTrackerStep(
         track_activation_threshold=config.get("track_threshold", 0.25),
         lost_track_buffer=config.get("lost_buffer", 30),
         minimum_matching_threshold=config.get("match_threshold", 0.8),
+        detections_key="detections",
     )
 
     # 5. Line zone step (with translated coordinates)
     line_zone_step = sv.LineZoneStep(
         start=line_start,
         end=line_end,
+        detections_key="detections",
     )
 
     # 6. ROI visualization step
     roi_viz = ROIVisualizationStep(color=(255, 255, 0), thickness=2)  # Cyan in BGR
 
-    # 7. Frame restore step (switch back to original frame for annotation)
-    frame_restore = FrameRestoreStep()
-
-    # 8. Line crossing logger
+    # 7. Line crossing logger
     crossing_logger = LineCrossingLoggerStep(
         socket_port=config.get("socket_port", 7777),
         log_file=config.get("log_file", "count.log"),
@@ -580,17 +574,16 @@ def main():
     # Add all processing steps
     pipeline = (
         pipeline
-        | roi_step  # Extract centered ROI
-        | detector  # Detect on ROI (parallel pool)
-        | coord_translate  # Translate coordinates to full frame
-        | tracker  # Track objects (requires ordered frames!)
+        | roi_step  # Extract ROI to 'roi_frame'
+        | detector  # Detect on ROI frame -> 'roi_detections'
+        | coord_translate  # Translate 'roi_detections' -> 'detections'
+        | tracker  # Track objects on 'detections'
         | line_zone_step  # Count line crossings
-        | roi_viz  # Draw ROI rectangle on original frame
-        | frame_restore  # Restore original frame for annotation
-        | sv.TrackerAnnotatorStep(  # Draw tracking visualization
-            trace_length=30, trace_thickness=2, copy_frame=False
+        | roi_viz  # Draw ROI rectangle on original 'frame'
+        | sv.TrackerAnnotatorStep(  # Draw tracking visualization on 'frame'
+            trace_length=30, trace_thickness=2, copy_frame=False, detections_key="detections"
         )
-        | sv.LineZoneAnnotatorStep(  # Draw line and counts
+        | sv.LineZoneAnnotatorStep(  # Draw line and counts on 'frame'
             color=sv.Color.WHITE,
             thickness=config.get("line_thickness", 4),
             text_scale=0.8,
