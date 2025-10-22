@@ -37,6 +37,7 @@ class BoxAnnotatorStep:
         color: Any = None,
         color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
+        input_key: str = "frame",
         output_key: str = "frame",
         copy_frame: bool = True,
     ):
@@ -49,6 +50,7 @@ class BoxAnnotatorStep:
             color_lookup: Strategy for mapping colors to annotations
                 (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections
+            input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store annotated frame
             copy_frame: Whether to copy frame before annotating (default: True)
         """
@@ -59,19 +61,20 @@ class BoxAnnotatorStep:
             color=color, thickness=thickness, color_lookup=color_lookup
         )
         self.detections_key = detections_key
+        self.input_key = input_key
         self.output_key = output_key
         self.copy_frame = copy_frame
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """Draw bounding boxes on frame."""
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         detections = data.get(self.detections_key)
 
         if frame is None:
             return data
 
         # Copy frame if requested and modifying original
-        if self.copy_frame and self.output_key == "frame":
+        if self.copy_frame and self.output_key == self.input_key:
             annotated_frame = frame.copy()
         else:
             annotated_frame = frame
@@ -86,7 +89,7 @@ class BoxAnnotatorStep:
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
 
 class LabelAnnotatorStep:
@@ -123,6 +126,7 @@ class LabelAnnotatorStep:
         color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
         labels_key: str = "labels",
+        input_key: str = "frame",
         output_key: str = "frame",
         copy_frame: bool = True,
     ):
@@ -139,6 +143,7 @@ class LabelAnnotatorStep:
                 (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections
             labels_key: Key in data dict containing labels list
+            input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store annotated frame
             copy_frame: Whether to copy frame before annotating (default: True)
         """
@@ -158,12 +163,13 @@ class LabelAnnotatorStep:
         )
         self.detections_key = detections_key
         self.labels_key = labels_key
+        self.input_key = input_key
         self.output_key = output_key
         self.copy_frame = copy_frame
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
         """Draw labels on frame."""
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         detections = data.get(self.detections_key)
         labels = data.get(self.labels_key)
 
@@ -171,7 +177,7 @@ class LabelAnnotatorStep:
             return data
 
         # Copy frame if requested and modifying original
-        if self.copy_frame and self.output_key == "frame":
+        if self.copy_frame and self.output_key == self.input_key:
             annotated_frame = frame.copy()
         else:
             annotated_frame = frame
@@ -190,7 +196,7 @@ class LabelAnnotatorStep:
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
 
 class TraceAnnotatorStep:
@@ -240,6 +246,7 @@ class TraceAnnotatorStep:
         color: Any = None,
         color_lookup: ColorLookup = ColorLookup.CLASS,
         detections_key: str = "detections",
+        input_key: str = "frame",
         output_key: str = "frame",
     ):
         """
@@ -253,6 +260,7 @@ class TraceAnnotatorStep:
                 (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK
             detections_key: Key in data dict containing Detections object
                 (default: 'detections')
+            input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store annotated frame (default: overwrites 'frame')
         """
         if color is None:
@@ -265,6 +273,7 @@ class TraceAnnotatorStep:
             color_lookup=color_lookup,
         )
         self.detections_key = detections_key
+        self.input_key = input_key
         self.output_key = output_key
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -272,19 +281,19 @@ class TraceAnnotatorStep:
         Draw traces on the frame.
 
         Args:
-            data: Pipeline data containing 'frame' and detections with tracker_id
+            data: Pipeline data containing frame and detections with tracker_id
 
         Returns:
             Data with annotated frame showing tracking traces
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         detections = data.get(self.detections_key)
 
         if frame is None:
             return data
 
         # Make a copy if we might modify the original
-        if self.output_key == "frame":
+        if self.output_key == self.input_key:
             annotated_frame = frame.copy()
         else:
             annotated_frame = frame
@@ -306,7 +315,7 @@ class TraceAnnotatorStep:
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
 
 
 class LineZoneAnnotatorStep:
@@ -378,6 +387,7 @@ class LineZoneAnnotatorStep:
         text_orient_to_line: bool = False,
         text_centered: bool = True,
         line_zone_key: str = "line_zone",
+        input_key: str = "frame",
         output_key: str = "frame",
         copy_frame: bool = True,
     ):
@@ -401,10 +411,12 @@ class LineZoneAnnotatorStep:
             text_centered: Whether to center text on line
             line_zone_key: Key in data dict containing LineZone object
                 (default: 'line_zone')
+            input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store annotated frame (default: overwrites 'frame')
             copy_frame: Whether to copy frame before annotating (default: True)
         """
         self.line_zone_key = line_zone_key
+        self.input_key = input_key
         self.output_key = output_key
         self.copy_frame = copy_frame
 
@@ -430,19 +442,19 @@ class LineZoneAnnotatorStep:
         Annotate frame with line zone and counts.
 
         Args:
-            data: Pipeline data containing 'frame' and 'line_zone'
+            data: Pipeline data containing frame and line_zone
 
         Returns:
             Data with annotated frame showing line and crossing counts
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         line_zone = data.get(self.line_zone_key)
 
         if frame is None or line_zone is None:
             return data
 
         # Copy frame if requested and modifying original
-        if self.copy_frame and self.output_key == "frame":
+        if self.copy_frame and self.output_key == self.input_key:
             annotated_frame = frame.copy()
         else:
             annotated_frame = frame
@@ -457,7 +469,7 @@ class LineZoneAnnotatorStep:
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame and line_zone exist."""
-        return "frame" in data and self.line_zone_key in data
+        return self.input_key in data and self.line_zone_key in data
 
 
 class TrackerAnnotatorStep:
@@ -524,6 +536,7 @@ class TrackerAnnotatorStep:
         trace_color: Any = None,
         color_lookup: ColorLookup = ColorLookup.TRACK,
         detections_key: str = "detections",
+        input_key: str = "frame",
         output_key: str = "frame",
         copy_frame: bool = True,
     ):
@@ -552,6 +565,7 @@ class TrackerAnnotatorStep:
                 (default: ColorLookup.TRACK). Options: INDEX, CLASS, TRACK.
                 Applied to boxes, labels, and traces.
             detections_key: Key in data dict containing Detections object
+            input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store annotated frame (default: overwrites 'frame')
             copy_frame: Whether to copy frame before annotating (default: True)
         """
@@ -593,6 +607,7 @@ class TrackerAnnotatorStep:
 
         # Keys
         self.detections_key = detections_key
+        self.input_key = input_key
         self.output_key = output_key
         self.copy_frame = copy_frame
 
@@ -636,19 +651,19 @@ class TrackerAnnotatorStep:
         Annotate frame with traces, boxes, and labels.
 
         Args:
-            data: Pipeline data containing 'frame' and detections
+            data: Pipeline data containing frame and detections
 
         Returns:
             Data with fully annotated frame showing traces, boxes, and labels
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         detections = data.get(self.detections_key)
 
         if frame is None:
             return data
 
         # Copy frame if requested and modifying original
-        if self.copy_frame and self.output_key == "frame":
+        if self.copy_frame and self.output_key == self.input_key:
             annotated_frame = frame.copy()
         else:
             annotated_frame = frame
@@ -684,4 +699,4 @@ class TrackerAnnotatorStep:
 
     def filter(self, data: dict[str, Any]) -> bool:
         """Process if frame exists."""
-        return "frame" in data
+        return self.input_key in data
