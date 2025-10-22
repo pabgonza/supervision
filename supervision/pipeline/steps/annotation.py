@@ -5,6 +5,7 @@ from typing import Any
 from supervision.annotators.core import (
     BoxAnnotator,
     LabelAnnotator,
+    MaskAnnotator,
     TraceAnnotator,
 )
 from supervision.annotators.utils import ColorLookup
@@ -688,6 +689,207 @@ class TrackerAnnotatorStep:
             )
 
             # 3. Generate and draw labels (foreground layer)
+            labels = self._format_labels(detections)
+            if labels:
+                annotated_frame = self.label_annotator.annotate(
+                    scene=annotated_frame, detections=detections, labels=labels
+                )
+
+        data[self.output_key] = annotated_frame
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if frame exists."""
+        return self.input_key in data
+
+
+class DetectionAnnotatorStep:
+    """
+    Pipeline step that combines mask, box, and label annotations for object detection.
+
+    This is a convenience step that combines MaskAnnotator, BoxAnnotator, and
+    LabelAnnotator into a single unified step for complete detection visualization
+    (without tracking).
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | yolo_step
+            | sv.DetectionAnnotatorStep(class_names=yolo_step.model.names)
+            | sv.DisplaySink("Detections")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom configuration with segmentation masks
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n-seg.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | yolo_step
+            | sv.DetectionAnnotatorStep(
+                class_names=yolo_step.model.names,
+                box_thickness=3,
+                mask_opacity=0.6,
+                show_confidence=True
+            )
+            | sv.DisplaySink("Detection Visualization")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        class_names: dict[int, str] | None = None,
+        show_class: bool = True,
+        show_confidence: bool = True,
+        confidence_decimals: int = 2,
+        mask_opacity: float = 0.5,
+        mask_color: Any = None,
+        box_thickness: int = 2,
+        box_color: Any = None,
+        label_text_color: Any = None,
+        label_text_scale: float = 0.5,
+        label_text_thickness: int = 1,
+        label_text_padding: int = 10,
+        label_color: Any = None,
+        color_lookup: ColorLookup = ColorLookup.CLASS,
+        detections_key: str = "detections",
+        input_key: str = "frame",
+        output_key: str = "frame",
+        copy_frame: bool = True,
+    ):
+        """
+        Initialize detection annotator step.
+
+        Args:
+            class_names: Dictionary mapping class IDs to class names.
+                If None, class IDs will be used instead of names.
+            show_class: Whether to show class name in labels
+            show_confidence: Whether to show confidence score in labels
+            confidence_decimals: Number of decimal places for confidence
+            mask_opacity: Opacity of segmentation masks (0-1, default: 0.5)
+            mask_color: Color or ColorPalette for masks (default: ColorPalette.DEFAULT)
+            box_thickness: Thickness of bounding box lines
+            box_color: Color or ColorPalette for boxes (default: ColorPalette.DEFAULT)
+            label_text_color: Color for label text (default: Color.BLACK)
+            label_text_scale: Scale of label text
+            label_text_thickness: Thickness of label text
+            label_text_padding: Padding around label text
+            label_color: Color or ColorPalette for label background
+                (default: ColorPalette.DEFAULT)
+            color_lookup: Strategy for mapping colors to all annotations
+                (default: ColorLookup.CLASS). Options: INDEX, CLASS, TRACK.
+                Applied to masks, boxes, and labels.
+            detections_key: Key in data dict containing Detections object
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store annotated frame (default: overwrites 'frame')
+            copy_frame: Whether to copy frame before annotating (default: True)
+        """
+        if mask_color is None:
+            mask_color = ColorPalette.DEFAULT
+        if box_color is None:
+            box_color = ColorPalette.DEFAULT
+        if label_text_color is None:
+            label_text_color = Color.BLACK
+        if label_color is None:
+            label_color = ColorPalette.DEFAULT
+
+        self.mask_annotator = MaskAnnotator(
+            color=mask_color, opacity=mask_opacity, color_lookup=color_lookup
+        )
+        self.box_annotator = BoxAnnotator(
+            color=box_color, thickness=box_thickness, color_lookup=color_lookup
+        )
+        self.label_annotator = LabelAnnotator(
+            text_color=label_text_color,
+            text_scale=label_text_scale,
+            text_thickness=label_text_thickness,
+            text_padding=label_text_padding,
+            color=label_color,
+            color_lookup=color_lookup,
+        )
+
+        self.class_names = class_names
+        self.show_class = show_class
+        self.show_confidence = show_confidence
+        self.confidence_decimals = confidence_decimals
+
+        self.detections_key = detections_key
+        self.input_key = input_key
+        self.output_key = output_key
+        self.copy_frame = copy_frame
+
+    def _format_labels(self, detections: Detections) -> list[str]:
+        """Generate formatted labels from detections."""
+        if detections is None or len(detections) == 0:
+            return []
+
+        labels = []
+        for i in range(len(detections)):
+            label_parts = []
+
+            if self.show_class:
+                if detections.class_id is not None:
+                    class_id = detections.class_id[i]
+                    if self.class_names and class_id in self.class_names:
+                        label_parts.append(self.class_names[class_id])
+                    else:
+                        label_parts.append(f"class_{class_id}")
+
+            if self.show_confidence and detections.confidence is not None:
+                confidence = detections.confidence[i]
+                conf_str = f"{confidence:.{self.confidence_decimals}f}"
+                label_parts.append(conf_str)
+
+            label = " ".join(label_parts) if label_parts else ""
+            labels.append(label)
+
+        return labels
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Annotate frame with masks, boxes, and labels.
+
+        Args:
+            data: Pipeline data containing frame and detections
+
+        Returns:
+            Data with fully annotated frame showing masks, boxes, and labels
+        """
+        frame = data.get(self.input_key)
+        detections = data.get(self.detections_key)
+
+        if frame is None:
+            return data
+
+        if self.copy_frame and self.output_key == self.input_key:
+            annotated_frame = frame.copy()
+        else:
+            annotated_frame = frame
+
+        if (
+            detections is not None
+            and isinstance(detections, Detections)
+            and len(detections) > 0
+        ):
+            if hasattr(detections, "mask") and detections.mask is not None:
+                annotated_frame = self.mask_annotator.annotate(
+                    scene=annotated_frame, detections=detections
+                )
+
+            annotated_frame = self.box_annotator.annotate(
+                scene=annotated_frame, detections=detections
+            )
+
             labels = self._format_labels(detections)
             if labels:
                 annotated_frame = self.label_annotator.annotate(

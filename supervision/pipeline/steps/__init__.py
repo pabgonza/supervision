@@ -2,6 +2,7 @@
 
 from supervision.pipeline.steps.annotation import (
     BoxAnnotatorStep,
+    DetectionAnnotatorStep,
     LabelAnnotatorStep,
     LineZoneAnnotatorStep,
     TraceAnnotatorStep,
@@ -39,6 +40,7 @@ __all__ = [
     "YOLODetectionStep",
     # Annotation steps
     "BoxAnnotatorStep",
+    "DetectionAnnotatorStep",
     "LabelAnnotatorStep",
     "LineZoneAnnotatorStep",
     "TraceAnnotatorStep",
