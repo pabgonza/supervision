@@ -777,3 +777,76 @@ def test_line_zone_long_horizon_disappearing_detections(
         assert crossed_out_list == expected_crossed_out
         assert count_in_list == expected_count_in
         assert count_out_list == expected_count_out
+
+
+def test_line_zone_crossing_ids():
+    """Test that LineZone correctly stores IDs of objects that crossed."""
+    line_zone = LineZone(
+        start=Point(0, 0),
+        end=Point(100, 0),
+        triggering_anchors=[Position.CENTER],
+    )
+
+    # Create detections with specific tracker IDs
+    # Positioned above the horizontal line (y > 0)
+    detections_above = mock_detections(
+        xyxy=[[10, 4, 15, 8], [40, 4, 45, 8], [70, 4, 75, 8]],
+        tracker_id=[10, 20, 30],
+    )
+
+    # First frame: all detections above the line
+    crossed_in, crossed_out = line_zone.trigger(detections_above)
+    assert len(line_zone.last_crossed_in_ids) == 0
+    assert len(line_zone.last_crossed_out_ids) == 0
+
+    # Second frame: move detections below the line (crossing in)
+    detections_below = mock_detections(
+        xyxy=[[10, -8, 15, -4], [40, -8, 45, -4], [70, -8, 75, -4]],
+        tracker_id=[10, 20, 30],
+    )
+    crossed_in, crossed_out = line_zone.trigger(detections_below)
+    assert len(line_zone.last_crossed_in_ids) == 3
+    assert 10 in line_zone.last_crossed_in_ids
+    assert 20 in line_zone.last_crossed_in_ids
+    assert 30 in line_zone.last_crossed_in_ids
+    assert len(line_zone.last_crossed_out_ids) == 0
+
+    # Third frame: move back above (crossing out)
+    crossed_in, crossed_out = line_zone.trigger(detections_above)
+    assert len(line_zone.last_crossed_in_ids) == 0
+    assert len(line_zone.last_crossed_out_ids) == 3
+    assert 10 in line_zone.last_crossed_out_ids
+    assert 20 in line_zone.last_crossed_out_ids
+    assert 30 in line_zone.last_crossed_out_ids
+
+    # Fourth frame: no crossing, stay above
+    crossed_in, crossed_out = line_zone.trigger(detections_above)
+    assert len(line_zone.last_crossed_in_ids) == 0
+    assert len(line_zone.last_crossed_out_ids) == 0
+
+    # Test with partial crossing: move two objects below, then back up
+    # Fifth frame: move objects 20 and 30 below
+    detections_partial_below = mock_detections(
+        xyxy=[[10, 4, 15, 8], [40, -8, 45, -4], [70, -8, 75, -4]],
+        tracker_id=[10, 20, 30],
+    )
+    crossed_in, crossed_out = line_zone.trigger(detections_partial_below)
+    assert len(line_zone.last_crossed_in_ids) == 2
+    assert 20 in line_zone.last_crossed_in_ids
+    assert 30 in line_zone.last_crossed_in_ids
+    assert len(line_zone.last_crossed_out_ids) == 0
+
+    # Sixth frame: move objects 20 and 30 back up
+    crossed_in, crossed_out = line_zone.trigger(detections_above)
+    assert len(line_zone.last_crossed_in_ids) == 0
+    assert len(line_zone.last_crossed_out_ids) == 2
+    assert 20 in line_zone.last_crossed_out_ids
+    assert 30 in line_zone.last_crossed_out_ids
+
+    # Test empty detections
+    from supervision import Detections
+
+    empty_detections = Detections.empty()
+    crossed_in, crossed_out = line_zone.trigger(empty_detections)
+    assert len(line_zone.last_crossed_in_ids) == 0
+    assert len(line_zone.last_crossed_out_ids) == 0

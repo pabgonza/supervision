@@ -49,6 +49,10 @@ class LineZone:
             crossed the line from outside to inside.
         out_count_per_class (Dict[int, int]): Number of objects of each class that have
             crossed the line from inside to outside.
+        last_crossed_in_ids (np.ndarray): Tracker IDs of objects that crossed from
+            outside to inside in the last trigger call.
+        last_crossed_out_ids (np.ndarray): Tracker IDs of objects that crossed from
+            inside to outside in the last trigger call.
 
     Example:
         ```python
@@ -69,6 +73,12 @@ class LineZone:
 
         line_zone.in_count, line_zone.out_count
         # 7, 2
+
+        # Access IDs of objects that crossed in the last frame
+        line_zone.last_crossed_in_ids
+        # array([3, 7])
+        line_zone.last_crossed_out_ids
+        # array([1])
         ```
     """
 
@@ -111,6 +121,8 @@ class LineZone:
         if not list(self.triggering_anchors):
             raise ValueError("Triggering anchors cannot be empty.")
         self.class_id_to_name: dict[int, str] = {}
+        self.last_crossed_in_ids: npt.NDArray[np.int_] = np.array([], dtype=int)
+        self.last_crossed_out_ids: npt.NDArray[np.int_] = np.array([], dtype=int)
 
     @property
     def in_count(self) -> int:
@@ -146,6 +158,8 @@ class LineZone:
         crossed_out = np.full(len(detections), False)
 
         if len(detections) == 0:
+            self.last_crossed_in_ids = np.array([], dtype=int)
+            self.last_crossed_out_ids = np.array([], dtype=int)
             return crossed_in, crossed_out
 
         if detections.tracker_id is None:
@@ -155,6 +169,8 @@ class LineZone:
                 "information.",
                 category=SupervisionWarnings,
             )
+            self.last_crossed_in_ids = np.array([], dtype=int)
+            self.last_crossed_out_ids = np.array([], dtype=int)
             return crossed_in, crossed_out
 
         self._update_class_id_to_name(detections)
@@ -199,6 +215,9 @@ class LineZone:
             else:
                 self._out_count_per_class[class_id] += 1
                 crossed_out[i] = True
+
+        self.last_crossed_in_ids = detections.tracker_id[crossed_in]
+        self.last_crossed_out_ids = detections.tracker_id[crossed_out]
 
         return crossed_in, crossed_out
 
