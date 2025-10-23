@@ -67,180 +67,6 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-class ROIExtractionStep:
-    """
-    Pipeline step to extract a configurable ROI from the frame.
-
-    Extracts a rectangular ROI from specified coordinates and stores
-    the offset coordinates for later translation.
-    """
-
-    def __init__(
-        self,
-        x: int | None = None,
-        y: int | None = None,
-        width: int = 640,
-        height: int = 640,
-        input_key: str = "frame",
-        output_key: str = "roi_frame",
-    ):
-        """
-        Initialize ROI extraction step.
-
-        Args:
-            x: X coordinate of ROI top-left corner (None = center horizontally)
-            y: Y coordinate of ROI top-left corner (None = center vertically)
-            width: Width of ROI (default: 640)
-            height: Height of ROI (default: 640)
-            input_key: Key in data dict containing input frame (default: 'frame')
-            output_key: Key to store ROI frame (default: 'roi_frame')
-        """
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
-        self.input_key = input_key
-        self.output_key = output_key
-        self.roi_x = 0
-        self.roi_y = 0
-
-    def process(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Extract ROI from frame."""
-        frame = data.get(self.input_key)
-        if frame is None:
-            return data
-
-        # Calculate ROI coordinates
-        h, w = frame.shape[:2]
-
-        # Use configured position or center
-        if self.x is None:
-            self.roi_x = max(0, (w - self.width) // 2)
-        else:
-            self.roi_x = max(0, min(self.x, w - self.width))
-
-        if self.y is None:
-            self.roi_y = max(0, (h - self.height) // 2)
-        else:
-            self.roi_y = max(0, min(self.y, h - self.height))
-
-        # Ensure ROI fits within frame
-        roi_x_end = min(self.roi_x + self.width, w)
-        roi_y_end = min(self.roi_y + self.height, h)
-
-        # Extract ROI
-        roi = frame[self.roi_y : roi_y_end, self.roi_x : roi_x_end]
-
-        # Store ROI coordinates and ROI frame
-        data["roi_offset"] = (self.roi_x, self.roi_y)
-        data["roi_size"] = (roi.shape[1], roi.shape[0])  # (width, height)
-        data[self.output_key] = roi
-
-        return data
-
-    def filter(self, data: dict[str, Any]) -> bool:
-        """Always process."""
-        return self.input_key in data
-
-
-class CoordinateTranslationStep:
-    """
-    Pipeline step to translate detection coordinates from ROI to full frame.
-
-    Translates bounding boxes and other geometric data from ROI coordinates
-    back to original frame coordinates.
-    """
-
-    def __init__(
-        self,
-        input_key: str = "roi_detections",
-        output_key: str = "detections",
-    ):
-        """
-        Initialize coordinate translation step.
-
-        Args:
-            input_key: Key in data dict containing ROI detections (default: 'roi_detections')
-            output_key: Key to store translated detections (default: 'detections')
-        """
-        self.input_key = input_key
-        self.output_key = output_key
-
-    def process(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Translate detection coordinates from ROI to full frame."""
-        detections = data.get(self.input_key)
-        roi_offset = data.get("roi_offset")
-
-        if detections is None or roi_offset is None or len(detections) == 0:
-            if detections is not None:
-                data[self.output_key] = detections
-            return data
-
-        roi_x, roi_y = roi_offset
-
-        # Create a copy to avoid modifying the original
-        import copy
-        translated_detections = copy.deepcopy(detections)
-
-        # Translate bounding boxes
-        if translated_detections.xyxy is not None:
-            translated_detections.xyxy[:, [0, 2]] += roi_x  # x coordinates
-            translated_detections.xyxy[:, [1, 3]] += roi_y  # y coordinates
-
-        data[self.output_key] = translated_detections
-        return data
-
-    def filter(self, data: dict[str, Any]) -> bool:
-        """Always process."""
-        return True
-
-
-class ROIVisualizationStep:
-    """
-    Pipeline step to draw ROI rectangle on frame.
-
-    Draws a rectangle showing the ROI area on the full frame.
-    """
-
-    def __init__(self, color: tuple = (255, 255, 0), thickness: int = 2):
-        """
-        Initialize ROI visualization step.
-
-        Args:
-            color: Color of ROI rectangle in BGR (default: cyan)
-            thickness: Thickness of rectangle border
-        """
-        self.color = color
-        self.thickness = thickness
-
-    def process(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Draw ROI rectangle on frame."""
-        frame = data.get("frame")
-        roi_offset = data.get("roi_offset")
-        roi_size = data.get("roi_size")
-
-        if frame is None or roi_offset is None or roi_size is None:
-            return data
-
-        roi_x, roi_y = roi_offset
-        roi_w, roi_h = roi_size
-
-        # Draw ROI rectangle on frame
-        cv2.rectangle(
-            frame,
-            (roi_x, roi_y),
-            (roi_x + roi_w, roi_y + roi_h),
-            self.color,
-            self.thickness,
-        )
-
-        return data
-
-    def filter(self, data: dict[str, Any]) -> bool:
-        """Always process."""
-        return True
-
-
 class LineCrossingLoggerStep:
     """
     Pipeline step to log line crossing events to socket and file.
@@ -514,7 +340,7 @@ def main():
 
     # 1. ROI extraction step (extracts ROI to 'roi_frame' key)
     roi_config = config.get("roi", {})
-    roi_step = ROIExtractionStep(
+    roi_step = sv.ROIExtractionStep(
         x=roi_config.get("x"),
         y=roi_config.get("y"),
         width=roi_config.get("width", 640),
@@ -535,7 +361,7 @@ def main():
     )
 
     # 3. Coordinate translation step (translates ROI detections to full frame)
-    coord_translate = CoordinateTranslationStep(
+    coord_translate = sv.CoordinateTranslationStep(
         input_key="roi_detections",
         output_key="detections",
     )
@@ -556,7 +382,7 @@ def main():
     )
 
     # 6. ROI visualization step
-    roi_viz = ROIVisualizationStep(color=(255, 255, 0), thickness=2)  # Cyan in BGR
+    roi_viz = sv.ROIVisualizationStep(color=(255, 255, 0), thickness=2)  # Cyan in BGR
 
     # 7. Line crossing logger
     crossing_logger = LineCrossingLoggerStep(
