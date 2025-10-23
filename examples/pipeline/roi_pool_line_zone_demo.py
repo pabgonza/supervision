@@ -28,17 +28,12 @@ Usage:
 import argparse
 import logging
 import socket
-import sys
 import threading
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 from typing import Any
 
 import supervision as sv
-
-# Add examples/pipeline directory to path for utils import
-sys.path.insert(0, str(Path(__file__).parent))
 import utils
 
 # Configure logging
@@ -477,7 +472,6 @@ def main():
     print(f"Workers Active:       {detector_metrics['workers_active']}")
 
     # Print tracker metrics
-    import utils
     tracker_metrics = tracker.get_metrics()
     utils.print_tracker_metrics(tracker_metrics)
 
