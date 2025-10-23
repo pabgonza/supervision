@@ -118,8 +118,8 @@ def main():
             output_key="roi_frame",
         )
 
-    # Detector
-    detector = sv.YOLODetectionStep(
+    # Detector (keep reference for class names)
+    yolo_step = sv.YOLODetectionStep(
         model_path=detector_cfg.get("model_path"),
         conf=detector_cfg.get("confidence_threshold", 0.4),
         verbose=False,
@@ -148,11 +148,16 @@ def main():
 
     # Add processing steps
     if rois:
-        pipeline = pipeline | roi_step | detector | coord_translate | roi_viz
+        pipeline = pipeline | roi_step | yolo_step | coord_translate | roi_viz
     else:
-        pipeline = pipeline | detector
+        pipeline = pipeline | yolo_step
 
-    pipeline = pipeline | sv.BoxAnnotatorStep(detections_key="detections", copy_frame=False)
+    # Add annotations (boxes, labels, and confidence)
+    pipeline = pipeline | sv.DetectionAnnotatorStep(
+        detections_key="detections",
+        class_names=yolo_step.model.names,  # Pass class names from YOLO model
+        copy_frame=False
+    )
 
     # Add metrics overlay if requested
     if display_cfg.get("show_metrics", False):
