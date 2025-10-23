@@ -770,6 +770,55 @@ class TestLineZoneStep:
         assert isinstance(result["line_zone"].in_count_per_class, dict)
         assert isinstance(result["line_zone"].out_count_per_class, dict)
 
+    def test_line_zone_step_exposes_crossing_ids(self):
+        """Test that LineZoneStep exposes crossing IDs through line_zone object."""
+        start = sv.Point(x=0, y=100)
+        end = sv.Point(x=200, y=100)
+        step = sv.LineZoneStep(start=start, end=end)
+
+        # Create detections above the line
+        detections_above = sv.Detections(
+            xyxy=np.array([[50, 110, 70, 125], [100, 110, 120, 125]]),
+            class_id=np.array([0, 0]),
+            confidence=np.array([0.9, 0.8]),
+            tracker_id=np.array([10, 20]),
+        )
+
+        data = {"detections": detections_above}
+        result = step.process(data)
+
+        # Initially no crossings
+        assert "line_zone" in result
+        assert len(result["line_zone"].last_crossed_in_ids) == 0
+        assert len(result["line_zone"].last_crossed_out_ids) == 0
+
+        # Move detections below the line (crossing in)
+        detections_below = sv.Detections(
+            xyxy=np.array([[50, 80, 70, 95], [100, 80, 120, 95]]),
+            class_id=np.array([0, 0]),
+            confidence=np.array([0.9, 0.8]),
+            tracker_id=np.array([10, 20]),
+        )
+
+        data = {"detections": detections_below}
+        result = step.process(data)
+
+        # Check that crossing IDs are accessible through line_zone
+        assert "line_zone" in result
+        assert len(result["line_zone"].last_crossed_in_ids) == 2
+        assert 10 in result["line_zone"].last_crossed_in_ids
+        assert 20 in result["line_zone"].last_crossed_in_ids
+        assert len(result["line_zone"].last_crossed_out_ids) == 0
+
+        # Move back above (crossing out)
+        data = {"detections": detections_above}
+        result = step.process(data)
+
+        assert len(result["line_zone"].last_crossed_in_ids) == 0
+        assert len(result["line_zone"].last_crossed_out_ids) == 2
+        assert 10 in result["line_zone"].last_crossed_out_ids
+        assert 20 in result["line_zone"].last_crossed_out_ids
+
 
 class TestLineZoneAnnotatorStep:
     """Tests for LineZoneAnnotatorStep pipeline component."""

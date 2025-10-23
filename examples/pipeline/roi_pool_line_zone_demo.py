@@ -365,7 +365,7 @@ class LineCrossingLoggerStep:
 
             # Print to console
             logger.info(
-                f"Line crossing: IN +{in_increment}, OUT +{out_increment}"
+                f"Line crossing: IN +{in_increment}, OUT +{out_increment}, IDs crossed in: {line_zone.last_crossed_in_ids}, IDs crossed out: {line_zone.last_crossed_out_ids}"
             )
 
         # Update previous counts

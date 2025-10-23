@@ -237,6 +237,8 @@ class LineZoneStep:
         for data in pipeline:
             line_zone = data["line_zone"]
             print(f"In: {line_zone.in_count}, Out: {line_zone.out_count}")
+            print(f"IDs crossed in: {line_zone.last_crossed_in_ids}")
+            print(f"IDs crossed out: {line_zone.last_crossed_out_ids}")
         ```
     """
 
@@ -281,19 +283,21 @@ class LineZoneStep:
             data: Pipeline data containing detections with tracker_id
 
         Returns:
-            Data with line_zone object added. Access counts via:
+            Data with line_zone object added. Access counts and crossing IDs via:
             - data["line_zone"].in_count
             - data["line_zone"].out_count
             - data["line_zone"].in_count_per_class
             - data["line_zone"].out_count_per_class
+            - data["line_zone"].last_crossed_in_ids
+            - data["line_zone"].last_crossed_out_ids
         """
         detections = data.get(self.detections_key)
 
         if detections is not None and len(detections) > 0:
-            # Trigger line zone with detections
             self.line_zone.trigger(detections)
+        else:
+            self.line_zone.trigger(data.get(self.detections_key, Detections.empty()))
 
-        # Store line_zone object in data dict
         data[self.line_zone_key] = self.line_zone
 
         return data
