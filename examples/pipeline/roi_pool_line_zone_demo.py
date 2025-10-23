@@ -28,12 +28,17 @@ Usage:
 import argparse
 import logging
 import socket
+import sys
 import threading
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 import supervision as sv
+
+# Add examples/pipeline directory to path for utils import
+sys.path.insert(0, str(Path(__file__).parent))
 import utils
 
 # Configure logging
