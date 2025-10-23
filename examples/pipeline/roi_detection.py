@@ -28,28 +28,12 @@ Usage:
 
 import argparse
 import logging
-from pathlib import Path
-
-import cv2
-import yaml
 
 import supervision as sv
+import utils
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file."""
-    config_file = Path(config_path)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_file, "r") as f:
-        config = yaml.safe_load(f)
-
-    logger.info(f"Loaded configuration from: {config_path}")
-    return config
 
 
 def main():
@@ -79,145 +63,130 @@ def main():
     args = parser.parse_args()
 
     try:
-        config = load_config(args.config)
+        config = utils.load_yaml_config(args.config)
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
         return
 
+    # Override config with command-line arguments
+    video_cfg = config.get("video", {})
+    detector_cfg = config.get("detector", {})
+
     if args.model:
-        config["model"] = args.model
+        detector_cfg["model_path"] = args.model
     if args.conf is not None:
-        config["conf"] = args.conf
+        detector_cfg["confidence_threshold"] = args.conf
 
     print("=" * 60)
     print("ROI-based Detection Demo")
     print("=" * 60)
     print(f"Config file: {args.config}")
-    print(f"Source: {config.get('source', 'webcam')}")
-    print(f"Input: {config.get('input', 'default')}")
-    print(f"Model: {config['model']}")
-    print(f"Device: {config.get('device', 'cuda')}")
-    print(f"Confidence: {config.get('conf', 0.25)}")
+    print(f"Input: {video_cfg.get('input')}")
+    print(f"Model: {detector_cfg.get('model_path')}")
+    print(f"Device: {detector_cfg.get('device', 'cuda')}")
+    print(f"Confidence: {detector_cfg.get('confidence_threshold', 0.4)}")
 
-    roi_cfg = config.get('roi', {})
-    roi_x = roi_cfg.get('x', 'centered')
-    roi_y = roi_cfg.get('y', 'centered')
-    roi_w = roi_cfg.get('width', 640)
-    roi_h = roi_cfg.get('height', 640)
-    print(f"ROI: x={roi_x}, y={roi_y}, size={roi_w}x{roi_h}")
+    rois = config.get('rois', [])
+    if rois:
+        roi = rois[0]
+        print(f"ROI: x={roi.get('x', 'centered')}, y={roi.get('y', 'centered')}, size={roi.get('w')}x{roi.get('h')}")
     print("=" * 60)
     print()
 
-    source_type = config.get("source", "webcam")
-    if source_type == "webcam":
-        source = sv.WebcamSource(camera_id=0)
-    elif source_type == "file":
-        source = sv.VideoFileSource(video_path=config["input"])
-    elif source_type == "stream":
-        source = sv.StreamSource(stream_url=config["input"])
-    else:
-        raise ValueError(f"Unknown source type: {source_type}")
+    # Create source using new utility
+    source = utils.create_source(video_cfg.get("input"))
 
-    try:
-        cap = source.cap if hasattr(source, "cap") else None
-        if cap is not None and cap.isOpened():
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-            if fps <= 0 or fps > 120:
-                fps = 30
-            if width <= 0 or height <= 0:
-                width, height = 1920, 1080
-        else:
-            fps, width, height = 30, 1920, 1080
-    except Exception:
-        fps, width, height = 30, 1920, 1080
+    # Get video info with fallbacks
+    fps, width, height = utils.get_video_info_with_fallbacks(
+        source,
+        fallback_fps=video_cfg.get("fallback_fps", 30),
+        fallback_resolution=tuple(video_cfg.get("fallback_resolution", [1920, 1080]))
+    )
 
     print(f"Video info: {width}x{height} @ {fps} fps\n")
 
-    roi_step = sv.ROIExtractionStep(
-        x=roi_cfg.get("x"),
-        y=roi_cfg.get("y"),
-        width=roi_cfg.get("width", 640),
-        height=roi_cfg.get("height", 640),
-        input_key="frame",
-        output_key="roi_frame",
-    )
+    # ROI extraction step
+    roi_step = None
+    if rois:
+        roi = rois[0]
+        roi_step = sv.ROIExtractionStep(
+            x=roi.get("x"),
+            y=roi.get("y"),
+            width=roi.get("w", 640),
+            height=roi.get("h", 640),
+            input_key="frame",
+            output_key="roi_frame",
+        )
 
+    # Detector
     detector = sv.YOLODetectionStep(
-        model_path=config["model"],
-        conf=config.get("conf", 0.25),
+        model_path=detector_cfg.get("model_path"),
+        conf=detector_cfg.get("confidence_threshold", 0.4),
         verbose=False,
-        input_key="roi_frame",
-        output_key="roi_detections",
+        input_key="roi_frame" if rois else "frame",
+        output_key="roi_detections" if rois else "detections",
     )
 
-    coord_translate = sv.CoordinateTranslationStep(
-        input_key="roi_detections",
-        output_key="detections",
-    )
+    # Coordinate translation (only if using ROI)
+    if rois:
+        coord_translate = sv.CoordinateTranslationStep(
+            input_key="roi_detections",
+            output_key="detections",
+        )
 
-    roi_viz = sv.ROIVisualizationStep(color=(255, 255, 0), thickness=2)
+    # ROI visualization
+    if rois:
+        roi_viz = sv.ROIVisualizationStep(color=(255, 255, 0), thickness=2)
 
+    # Build pipeline
     pipeline = sv.Pipeline(source)
 
-    if config.get("show_fps", False):
+    # Add FPS calculator
+    display_cfg = config.get("display", {})
+    if display_cfg.get("show_fps", True):
         pipeline = pipeline | sv.FPSCalculatorStep()
 
-    pipeline = (
-        pipeline
-        | roi_step
-        | detector
-        | coord_translate
-        | roi_viz
-        | sv.BoxAnnotatorStep(detections_key="detections", copy_frame=False)
-    )
+    # Add processing steps
+    if rois:
+        pipeline = pipeline | roi_step | detector | coord_translate | roi_viz
+    else:
+        pipeline = pipeline | detector
 
-    if config.get("show_metrics", False):
-        def add_metrics_overlay(data):
-            frame = data.get("frame")
-            if frame is None:
-                return data
+    pipeline = pipeline | sv.BoxAnnotatorStep(detections_key="detections", copy_frame=False)
 
-            detections = data.get("detections", sv.Detections.empty())
-            roi_size = data.get("roi_size", (640, 640))
-            roi_offset = data.get("roi_offset", (0, 0))
+    # Add metrics overlay if requested
+    if display_cfg.get("show_metrics", False):
+        metrics_cfg = display_cfg.get("metrics", {})
+        metrics_callback = utils.create_metrics_overlay_callback(
+            position=metrics_cfg.get("position", "top-left"),
+            font_scale=metrics_cfg.get("font_scale", 0.6),
+            color=tuple(metrics_cfg.get("color", [0, 255, 0])),
+            bg_opacity=metrics_cfg.get("background_opacity", 0.6),
+            show_fps=display_cfg.get("show_fps", True),
+            show_detections=metrics_cfg.get("show_detections", True),
+            show_tracked=False,
+            show_line_counts=False,
+            show_roi_info=metrics_cfg.get("show_roi_info", True) and rois,
+            show_inference_time=metrics_cfg.get("show_inference_time", True),
+            show_tracking_time=False,
+            show_pool_metrics=False,
+        )
+        pipeline = pipeline | sv.CallbackStep(metrics_callback)
 
-            lines = [
-                f"ROI: {roi_size[0]}x{roi_size[1]} at ({roi_offset[0]},{roi_offset[1]})",
-                f"Detections: {len(detections)}",
-            ]
-
-            y_offset = 25
-            for line in lines:
-                cv2.putText(
-                    frame,
-                    line,
-                    (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                    cv2.LINE_AA,
-                )
-                y_offset += 30
-
-            data["frame"] = frame
-            return data
-
-        pipeline = pipeline | sv.CallbackStep(add_metrics_overlay)
-
-    output_path = config.get("output")
-    if output_path:
+    # Add output sink if configured
+    output_cfg = config.get("output", {})
+    if output_cfg.get("enabled", False):
         pipeline = pipeline | sv.VideoFileSink(
-            output_path=output_path,
+            output_path=output_cfg.get("file_path", "output.mp4"),
             fps=fps,
             width=width,
             height=height,
         )
 
-    pipeline = pipeline | sv.DisplaySink(window_name="ROI Detection")
+    # Add display sink if enabled
+    if display_cfg.get("enabled", True):
+        window_name = display_cfg.get("window_name") or "ROI Detection"
+        pipeline = pipeline | sv.DisplaySink(window_name=window_name)
 
     print("Starting detection... Press 'q' to quit\n")
     try:
@@ -225,8 +194,8 @@ def main():
     except KeyboardInterrupt:
         print("\n\nInterrupted by user")
 
-    if output_path:
-        print(f"\nVideo saved to: {output_path}")
+    if output_cfg.get("enabled", False):
+        print(f"\nVideo saved to: {output_cfg.get('file_path', 'output.mp4')}")
 
     print("\nDone!")
 
