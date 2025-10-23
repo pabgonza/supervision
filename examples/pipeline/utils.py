@@ -6,7 +6,11 @@ to ensure consistent interfaces across all pipeline examples.
 """
 
 import argparse
+import os
+from pathlib import Path
 from typing import Optional, Union
+
+import yaml
 
 import supervision as sv
 
@@ -101,6 +105,54 @@ def add_fps_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Display FPS counter",
     )
+
+
+def create_source(
+    source_str: str,
+    camera_id: int = 0,
+    width: Optional[int] = None,
+    height: Optional[int] = None
+) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
+    """
+    Create video source automatically detecting the type.
+
+    Detects source type based on string pattern:
+    - RTSP/HTTP streams: starts with 'rtsp://' or 'http://'
+    - Video files: existing file path
+    - Webcam ID: numeric string ('0', '1', etc.)
+    - Stream: fallback for other cases
+
+    Args:
+        source_str: Source string (URL, file path, or camera ID)
+        camera_id: Camera ID for webcam (used only if source_str is numeric)
+        width: Optional width for webcam
+        height: Optional height for webcam
+
+    Returns:
+        Appropriate supervision source
+
+    Examples:
+        >>> create_source('rtsp://192.168.1.100:554/stream')
+        StreamSource(...)
+        >>> create_source('video.mp4')
+        VideoFileSource('video.mp4')
+        >>> create_source('0')
+        WebcamSource(camera_id=0)
+    """
+    if source_str.startswith('rtsp://') or source_str.startswith('http://'):
+        return sv.StreamSource(source_str)
+    elif os.path.isfile(source_str):
+        return sv.VideoFileSource(source_str)
+    elif source_str.isdigit():
+        cam_id = int(source_str)
+        webcam_kwargs = {"camera_id": cam_id}
+        if width is not None:
+            webcam_kwargs["width"] = width
+        if height is not None:
+            webcam_kwargs["height"] = height
+        return sv.WebcamSource(**webcam_kwargs)
+    else:
+        return sv.StreamSource(source_str)
 
 
 def create_source_from_args(args: argparse.Namespace) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
@@ -237,6 +289,52 @@ def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource
     return 30, 1280, 720
 
 
+def get_video_info_with_fallbacks(
+    source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource],
+    fallback_fps: int = 30,
+    fallback_resolution: tuple = (1920, 1080)
+) -> tuple:
+    """
+    Get video information with configurable fallback values.
+
+    Similar to get_video_info_from_source but allows custom fallback values.
+    Validates FPS is in reasonable range (1-120) and resolution is positive.
+
+    Args:
+        source: Supervision source
+        fallback_fps: FPS to use if unable to read or invalid (default: 30)
+        fallback_resolution: (width, height) to use if unable to read (default: 1920x1080)
+
+    Returns:
+        Tuple of (fps, width, height)
+
+    Examples:
+        >>> source = sv.StreamSource('rtsp://camera/stream')
+        >>> fps, w, h = get_video_info_with_fallbacks(source, fallback_fps=60)
+    """
+    import cv2
+
+    try:
+        cap = source.cap if hasattr(source, 'cap') else None
+
+        if cap is not None and cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            # Validate and apply fallbacks
+            if fps <= 0 or fps > 120:
+                fps = fallback_fps
+            if width <= 0 or height <= 0:
+                width, height = fallback_resolution
+
+            return int(fps), width, height
+    except Exception:
+        pass
+
+    return fallback_fps, fallback_resolution[0], fallback_resolution[1]
+
+
 def print_source_info(args: argparse.Namespace) -> None:
     """
     Print source configuration information.
@@ -287,6 +385,34 @@ def print_tracker_metrics(metrics: dict, title: str = "Tracking Metrics") -> Non
     print(f"Max Tracking Time:    {metrics['max_processing_time_ms']:.2f} ms")
     print(f"Total Tracking Time:  {metrics['total_processing_time_s']:.2f} s")
     print("=" * 60)
+
+
+def load_yaml_config(config_path: str) -> dict:
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Dictionary with configuration
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        yaml.YAMLError: If config file is invalid
+
+    Examples:
+        >>> config = load_yaml_config('config.yaml')
+        >>> print(config['model'])
+    """
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_file, "r") as f:
+        config = yaml.safe_load(f)
+
+    return config
 
 
 def get_tracker_step(pipeline) -> Optional[sv.ByteTrackerStep]:
@@ -416,3 +542,192 @@ def create_line_extract_callback():
         return data
 
     return extract_line_counts
+
+
+def create_metrics_overlay_callback(
+    position: str = "top-left",
+    font_scale: float = 0.5,
+    color: tuple = (0, 255, 0),
+    bg_opacity: float = 0.6,
+    show_fps: bool = True,
+    show_detections: bool = True,
+    show_tracked: bool = True,
+    show_line_counts: bool = True,
+    show_roi_info: bool = True,
+    show_inference_time: bool = True,
+    show_tracking_time: bool = True,
+    show_pool_metrics: bool = False,
+    frame_counter: Optional[dict] = None,
+):
+    """
+    Create configurable metrics overlay callback.
+
+    Args:
+        position: Position of overlay ("top-left", "top-right", "bottom-left", "bottom-right")
+        font_scale: Font scale for text (default: 0.5)
+        color: Text color in BGR format (default: green (0, 255, 0))
+        bg_opacity: Background opacity 0.0-1.0 (default: 0.6)
+        show_fps: Show FPS counter
+        show_detections: Show number of detections
+        show_tracked: Show number of tracked objects
+        show_line_counts: Show line crossing counts (if line_zone present)
+        show_roi_info: Show ROI dimensions and offset (if ROI present)
+        show_inference_time: Show YOLO inference time
+        show_tracking_time: Show tracking time
+        show_pool_metrics: Show pool detector metrics (if PoolYOLODetectionStep present)
+        frame_counter: Dict to track frame count (default: creates new dict)
+
+    Returns:
+        Callback function that adds metrics overlay to frame
+
+    Examples:
+        >>> # Basic usage
+        >>> callback = create_metrics_overlay_callback()
+        >>> pipeline = pipeline | sv.CallbackStep(callback)
+
+        >>> # Custom position and color
+        >>> callback = create_metrics_overlay_callback(
+        ...     position="top-right",
+        ...     color=(255, 255, 0),  # Cyan in BGR
+        ...     bg_opacity=0.8
+        ... )
+
+        >>> # Only show specific metrics
+        >>> callback = create_metrics_overlay_callback(
+        ...     show_fps=True,
+        ...     show_detections=True,
+        ...     show_tracked=False,
+        ...     show_line_counts=True,
+        ...     show_roi_info=False
+        ... )
+    """
+    import cv2
+
+    # Initialize frame counter if not provided
+    if frame_counter is None:
+        frame_counter = {"count": 0}
+
+    def add_metrics_overlay(data):
+        """Add metrics text overlay to frame."""
+        frame = data.get("frame")
+        if frame is None:
+            return data
+
+        # Increment frame counter
+        frame_counter["count"] += 1
+
+        # Collect metrics
+        lines = []
+
+        # Frame count
+        lines.append(f"Frame: {frame_counter['count']}")
+
+        # FPS
+        if show_fps:
+            fps_value = data.get("fps", 0.0)
+            lines.append(f"FPS: {fps_value:.1f}")
+
+        # Detections
+        detections = data.get("detections", sv.Detections.empty())
+        if show_detections:
+            lines.append(f"Detections: {len(detections)}")
+
+        # Tracked objects
+        if show_tracked and detections.tracker_id is not None:
+            num_tracked = len(set(detections.tracker_id[detections.tracker_id >= 0]))
+            lines.append(f"Tracked: {num_tracked}")
+
+        # Line zone counts
+        if show_line_counts:
+            line_zone = data.get("line_zone")
+            if line_zone is not None:
+                lines.append(f"Count IN: {line_zone.in_count}")
+                lines.append(f"Count OUT: {line_zone.out_count}")
+
+        # Inference time
+        if show_inference_time:
+            inference_time = data.get("yolo_processing_time_ms", 0.0)
+            lines.append(f"Inference: {inference_time:.1f}ms")
+
+        # Tracking time
+        if show_tracking_time:
+            tracking_time = data.get("tracker_processing_time_ms", 0.0)
+            lines.append(f"Tracking: {tracking_time:.1f}ms")
+
+        # ROI info
+        if show_roi_info:
+            roi_size = data.get("roi_size")
+            roi_offset = data.get("roi_offset")
+            if roi_size and roi_offset:
+                lines.append(f"ROI: {roi_size[0]}x{roi_size[1]}")
+                lines.append(f"ROI Offset: ({roi_offset[0]},{roi_offset[1]})")
+
+        # Pool detector metrics
+        if show_pool_metrics:
+            pool_detector = data.get("pool_detector")
+            if pool_detector is not None:
+                metrics = pool_detector.get_metrics()
+                queue_current, queue_max = pool_detector.get_queue_size()
+                lines.append(f"Workers: {metrics['workers_active']}")
+                lines.append(f"Queue: {queue_current}/{queue_max}")
+                lines.append(f"Dropped: {metrics['frames_dropped']}")
+
+        # Calculate text dimensions
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        thickness = 1
+        padding = 10
+        line_height = int(25 * font_scale)
+
+        # Calculate background size
+        max_width = 0
+        for line in lines:
+            (text_width, text_height), _ = cv2.getTextSize(
+                line, font, font_scale, thickness
+            )
+            max_width = max(max_width, text_width)
+
+        bg_width = max_width + 2 * padding
+        bg_height = len(lines) * line_height + padding
+
+        # Determine position
+        frame_height, frame_width = frame.shape[:2]
+
+        if position == "top-left":
+            x_start, y_start = 5, 5
+        elif position == "top-right":
+            x_start, y_start = frame_width - bg_width - 5, 5
+        elif position == "bottom-left":
+            x_start, y_start = 5, frame_height - bg_height - 5
+        else:  # bottom-right
+            x_start, y_start = frame_width - bg_width - 5, frame_height - bg_height - 5
+
+        # Draw semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(
+            overlay,
+            (x_start, y_start),
+            (x_start + bg_width, y_start + bg_height),
+            (0, 0, 0),
+            -1,
+        )
+        cv2.addWeighted(overlay, bg_opacity, frame, 1 - bg_opacity, 0, frame)
+
+        # Draw text on frame
+        y_offset = y_start + line_height
+        for line in lines:
+            cv2.putText(
+                frame,
+                line,
+                (x_start + padding, y_offset),
+                font,
+                font_scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+            y_offset += line_height
+
+        data["frame"] = frame
+        return data
+
+    return add_metrics_overlay
