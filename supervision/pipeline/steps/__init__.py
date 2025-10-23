@@ -18,6 +18,11 @@ from supervision.pipeline.steps.detection import (
     PoolYOLODetectionStep,
     YOLODetectionStep,
 )
+from supervision.pipeline.steps.roi import (
+    CoordinateTranslationStep,
+    ROIExtractionStep,
+    ROIVisualizationStep,
+)
 from supervision.pipeline.steps.tracking import ByteTrackerStep, LineZoneStep
 from supervision.pipeline.steps.transform import (
     CallbackStep,
@@ -48,6 +53,10 @@ __all__ = [
     # Tracking steps
     "ByteTrackerStep",
     "LineZoneStep",
+    # ROI steps
+    "CoordinateTranslationStep",
+    "ROIExtractionStep",
+    "ROIVisualizationStep",
     # Transform/utility steps
     "CallbackStep",
     "DetectionFilterStep",
