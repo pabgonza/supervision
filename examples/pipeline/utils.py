@@ -266,7 +266,7 @@ def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource
 
     try:
         # Access the underlying VideoCapture object
-        cap = source.cap if hasattr(source, 'cap') else None
+        cap = source.capture.cap if hasattr(source, 'capture') else None
 
         if cap is not None and cap.isOpened():
             # Get properties from VideoCapture
@@ -315,7 +315,7 @@ def get_video_info_with_fallbacks(
     import cv2
 
     try:
-        cap = source.cap if hasattr(source, 'cap') else None
+        cap = source.capture.cap if hasattr(source, 'capture') else None
 
         if cap is not None and cap.isOpened():
             fps = cap.get(cv2.CAP_PROP_FPS)
@@ -646,8 +646,10 @@ def create_metrics_overlay_callback(
 
         # Inference time
         if show_inference_time:
-            inference_time = data.get("yolo_processing_time_ms", 0.0)
-            lines.append(f"Inference: {inference_time:.1f}ms")
+            yolo_metrics = data.get("yolo_metrics", {})
+            if yolo_metrics:
+                total_time = sum(yolo_metrics.values())
+                lines.append(f"Inference: {total_time:.1f}ms")
 
         # Tracking time
         if show_tracking_time:
