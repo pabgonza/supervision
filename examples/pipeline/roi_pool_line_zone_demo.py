@@ -31,40 +31,14 @@ import socket
 import threading
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
 from typing import Any
 
-import cv2
-import numpy as np
-import yaml
-
 import supervision as sv
+import utils
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-def parse_point(point_str: str) -> sv.Point:
-    """Parse point from string format 'x,y'."""
-    try:
-        x, y = map(int, point_str.split(","))
-        return sv.Point(x=x, y=y)
-    except Exception:
-        raise ValueError(f"Invalid point format: {point_str}. Expected 'x,y'")
-
-
-def load_config(config_path: str) -> dict:
-    """Load configuration from YAML file."""
-    config_file = Path(config_path)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Config file not found: {config_path}")
-
-    with open(config_file, "r") as f:
-        config = yaml.safe_load(f)
-
-    logger.info(f"Loaded configuration from: {config_path}")
-    return config
 
 
 class LineCrossingLoggerStep:
@@ -248,89 +222,73 @@ def main():
 
     # Load config from file
     try:
-        config = load_config(args.config)
+        config = utils.load_yaml_config(args.config)
     except Exception as e:
         logger.error(f"Failed to load config: {e}")
         return
 
     # Override config with command-line arguments
+    video_cfg = config.get("video", {})
+    detector_cfg = config.get("detector", {})
+    pool_cfg = config.get("pool", {})
+
     if args.device:
-        config["device"] = args.device
-    if args.source:
-        config["source"] = args.source
+        detector_cfg["device"] = args.device
     if args.input:
-        config["input"] = args.input
+        video_cfg["input"] = args.input
     if args.model:
-        config["model"] = args.model
+        detector_cfg["model_path"] = args.model
     if args.conf is not None:
-        config["conf"] = args.conf
+        detector_cfg["confidence_threshold"] = args.conf
     if args.pool_size:
-        config["pool_size"] = args.pool_size
-    if args.roi_size:
-        config["roi_size"] = args.roi_size
+        pool_cfg["pool_size"] = args.pool_size
     if args.output:
-        config["output"] = args.output
+        config.setdefault("output", {})["file_path"] = args.output
 
     # Print configuration
     print("=" * 60)
     print("ROI-based Pool Detection + Line Zone Counter Demo")
     print("=" * 60)
-    print(f"Source: {config.get('source', 'webcam')}")
-    print(f"Input: {config.get('input', 'default')}")
-    print(f"Model: {config['model']}")
+    print(f"Input: {video_cfg.get('input')}")
+    print(f"Model: {detector_cfg.get('model_path')}")
 
     # Print ROI configuration
-    roi_cfg = config.get('roi', {})
-    roi_x = roi_cfg.get('x', 'centered')
-    roi_y = roi_cfg.get('y', 'centered')
-    roi_w = roi_cfg.get('width', 640)
-    roi_h = roi_cfg.get('height', 640)
-    print(f"ROI: x={roi_x}, y={roi_y}, {roi_w}x{roi_h}")
+    rois = config.get('rois', [])
+    if rois:
+        roi = rois[0]
+        print(f"ROI: x={roi.get('x', 'centered')}, y={roi.get('y', 'centered')}, {roi.get('w')}x{roi.get('h')}")
 
-    print(f"Pool Size: {config['pool_size']} workers")
-    print(f"Device: {config['device']}")
-    print(f"Confidence: {config['conf']}")
-    print(f"Socket Port: {config.get('socket_port', 7777)}")
-    print(f"Log File: {config.get('log_file', 'count.log')}")
+    print(f"Pool Size: {pool_cfg.get('pool_size', 10)} workers")
+    print(f"Device: {detector_cfg.get('device', 'cuda')}")
+    print(f"Confidence: {detector_cfg.get('confidence_threshold', 0.4)}")
+
+    logging_cfg = config.get('logging', {})
+    print(f"Socket Port: {logging_cfg.get('socket_port', 7777)}")
+    print(f"Log File: {logging_cfg.get('log_file', 'count.log')}")
     print("=" * 60)
     print()
 
-    # Create source based on config
-    source_type = config.get("source", "webcam")
-    if source_type == "webcam":
-        source = sv.WebcamSource(camera_id=0)
-    elif source_type == "file":
-        source = sv.VideoFileSource(video_path=config["input"])
-    elif source_type == "stream":
-        source = sv.StreamSource(stream_url=config["input"])
-    else:
-        raise ValueError(f"Unknown source type: {source_type}")
+    # Create source using new utility function
+    source = utils.create_source(video_cfg.get("input"))
 
-    # Get video info from source
-    import cv2
-
-    try:
-        cap = source.cap if hasattr(source, "cap") else None
-        if cap is not None and cap.isOpened():
-            fps = int(cap.get(cv2.CAP_PROP_FPS))
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-            # Validate values
-            if fps <= 0 or fps > 120:
-                fps = 30
-            if width <= 0 or height <= 0:
-                width, height = 1920, 1080
-        else:
-            fps, width, height = 30, 1920, 1080
-    except Exception:
-        fps, width, height = 30, 1920, 1080
+    # Get video info with fallbacks from config
+    fps, width, height = utils.get_video_info_with_fallbacks(
+        source,
+        fallback_fps=video_cfg.get("fallback_fps", 30),
+        fallback_resolution=tuple(video_cfg.get("fallback_resolution", [1920, 1080]))
+    )
 
     print(f"Video info: {width}x{height} @ {fps} fps\n")
 
     # Parse line points from config
-    line_start = parse_point(config.get("line_start", "640,0"))
-    line_end = parse_point(config.get("line_end", "640,720"))
+    lines = config.get("counting_lines", [])
+    if lines:
+        line = lines[0]
+        line_start = sv.Point(x=line["start"][0], y=line["start"][1])
+        line_end = sv.Point(x=line["end"][0], y=line["end"][1])
+    else:
+        line_start = sv.Point(x=640, y=0)
+        line_end = sv.Point(x=640, y=720)
 
     print(f"Line: ({line_start.x}, {line_start.y}) -> ({line_end.x}, {line_end.y})")
     print("=" * 60)
@@ -339,38 +297,42 @@ def main():
     # Create pipeline steps
 
     # 1. ROI extraction step (extracts ROI to 'roi_frame' key)
-    roi_config = config.get("roi", {})
-    roi_step = sv.ROIExtractionStep(
-        x=roi_config.get("x"),
-        y=roi_config.get("y"),
-        width=roi_config.get("width", 640),
-        height=roi_config.get("height", 640),
-        input_key="frame",
-        output_key="roi_frame",
-    )
+    rois_config = config.get("rois", [])
+    if rois_config:
+        roi = rois_config[0]
+        roi_step = sv.ROIExtractionStep(
+            x=roi.get("x"),
+            y=roi.get("y"),
+            width=roi.get("w", 640),
+            height=roi.get("h", 640),
+            input_key="frame",
+            output_key="roi_frame",
+        )
 
     # 2. Pool detector (operates on ROI frame, outputs to 'roi_detections')
     detector = sv.PoolYOLODetectionStep(
-        model_path=config["model"],
-        pool_size=config["pool_size"],
-        conf=config["conf"],
-        max_queue_size=config.get("queue_size", 10),
+        model_path=detector_cfg.get("model_path"),
+        pool_size=pool_cfg.get("pool_size", 10),
+        conf=detector_cfg.get("confidence_threshold", 0.4),
+        max_queue_size=pool_cfg.get("queue_size", 120),
         warmup=True,
-        input_key="roi_frame",
-        output_key="roi_detections",
+        input_key="roi_frame" if rois_config else "frame",
+        output_key="roi_detections" if rois_config else "detections",
     )
 
     # 3. Coordinate translation step (translates ROI detections to full frame)
-    coord_translate = sv.CoordinateTranslationStep(
-        input_key="roi_detections",
-        output_key="detections",
-    )
+    if rois_config:
+        coord_translate = sv.CoordinateTranslationStep(
+            input_key="roi_detections",
+            output_key="detections",
+        )
 
     # 4. Tracker (requires frames in order!)
+    tracker_cfg = config.get("tracker", {})
     tracker = sv.ByteTrackerStep(
-        track_activation_threshold=config.get("track_threshold", 0.25),
-        lost_track_buffer=config.get("lost_buffer", 30),
-        minimum_matching_threshold=config.get("match_threshold", 0.8),
+        track_activation_threshold=tracker_cfg.get("track_activation_threshold", 0.25),
+        lost_track_buffer=tracker_cfg.get("lost_track_buffer", 30),
+        minimum_matching_threshold=tracker_cfg.get("minimum_matching_threshold", 0.8),
         detections_key="detections",
     )
 
@@ -382,128 +344,83 @@ def main():
     )
 
     # 6. ROI visualization step
-    roi_viz = sv.ROIVisualizationStep(color=(255, 255, 0), thickness=2)  # Cyan in BGR
+    if rois_config:
+        roi_viz = sv.ROIVisualizationStep(color=(255, 255, 0), thickness=2)
 
     # 7. Line crossing logger
     crossing_logger = LineCrossingLoggerStep(
-        socket_port=config.get("socket_port", 7777),
-        log_file=config.get("log_file", "count.log"),
+        socket_port=logging_cfg.get("socket_port", 7777),
+        log_file=logging_cfg.get("log_file", "count.log"),
     )
 
     # Build pipeline
     pipeline = sv.Pipeline(source)
 
-    # Add FPS calculator if requested
-    if config.get("show_fps", False):
+    # Add FPS calculator
+    display_cfg = config.get("display", {})
+    if display_cfg.get("show_fps", True):
         pipeline = pipeline | sv.FPSCalculatorStep()
 
     # Add all processing steps
+    if rois_config:
+        pipeline = pipeline | roi_step | detector | coord_translate
+    else:
+        pipeline = pipeline | detector
+
+    pipeline = pipeline | tracker | line_zone_step
+
+    if rois_config:
+        pipeline = pipeline | roi_viz
+
     pipeline = (
         pipeline
-        | roi_step  # Extract ROI to 'roi_frame'
-        | detector  # Detect on ROI frame -> 'roi_detections'
-        | coord_translate  # Translate 'roi_detections' -> 'detections'
-        | tracker  # Track objects on 'detections'
-        | line_zone_step  # Count line crossings
-        | roi_viz  # Draw ROI rectangle on original 'frame'
-        | sv.TrackerAnnotatorStep(  # Draw tracking visualization on 'frame'
+        | sv.TrackerAnnotatorStep(
             trace_length=30, trace_thickness=2, copy_frame=False, detections_key="detections"
         )
-        | sv.LineZoneAnnotatorStep(  # Draw line and counts on 'frame'
+        | sv.LineZoneAnnotatorStep(
             color=sv.Color.WHITE,
-            thickness=config.get("line_thickness", 4),
+            thickness=config.get("line_visualization", {}).get("thickness", 4),
             text_scale=0.8,
-            custom_in_text=config.get("in_text"),
-            custom_out_text=config.get("out_text"),
+            custom_in_text=config.get("line_visualization", {}).get("in_text"),
+            custom_out_text=config.get("line_visualization", {}).get("out_text"),
             copy_frame=False,
         )
-        | crossing_logger  # Log crossing events
+        | crossing_logger
     )
 
     # Add metrics overlay if requested
-    if config.get("show_metrics", False):
-
-        def add_metrics_overlay(data):
-            """Add metrics text overlay to frame."""
-            frame = data.get("frame")
-            if frame is None:
-                return data
-
-            metrics = detector.get_metrics()
-            queue_current, queue_max = detector.get_queue_size()
-            detections = data.get("detections", sv.Detections.empty())
-            num_tracked = (
-                len(set(detections.tracker_id))
-                if detections.tracker_id is not None
-                else 0
-            )
-
-            # Get line zone counts
-            line_zone = data.get("line_zone")
-            in_count = line_zone.in_count if line_zone is not None else 0
-            out_count = line_zone.out_count if line_zone is not None else 0
-
-            # Get ROI info from data
-            roi_size = data.get("roi_size", (640, 640))
-            roi_offset = data.get("roi_offset", (0, 0))
-
-            # Get tracking time from current frame
-            tracking_time = data.get("tracker_processing_time_ms", 0.0)
-
-            # Create metrics text
-            lines = [
-                f"Workers: {metrics['workers_active']}",
-                f"ROI: {roi_size[0]}x{roi_size[1]} at ({roi_offset[0]},{roi_offset[1]})",
-                f"Detections: {len(detections)}",
-                f"Tracked: {num_tracked}",
-                f"IN Count: {in_count}",
-                f"OUT Count: {out_count}",
-                f"Processed: {metrics['frames_processed']}",
-                f"Dropped: {metrics['frames_dropped']}",
-                f"Input Queue: {queue_current}/{queue_max}",
-                f"Avg Inference: {metrics['avg_inference_time_ms']:.1f}ms",
-                f"Tracking: {tracking_time:.1f}ms",
-            ]
-
-            # Draw semi-transparent background
-            overlay = frame.copy()
-            bg_height = len(lines) * 25 + 15
-            cv2.rectangle(overlay, (5, 5), (320, bg_height), (0, 0, 0), -1)
-            cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-
-            # Draw text on frame
-            y_offset = 25
-            for line in lines:
-                cv2.putText(
-                    frame,
-                    line,
-                    (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 0),
-                    1,
-                    cv2.LINE_AA,
-                )
-                y_offset += 25
-
-            data["frame"] = frame
-            return data
-
-        pipeline = pipeline | sv.CallbackStep(add_metrics_overlay)
+    if display_cfg.get("show_metrics", False):
+        metrics_cfg = display_cfg.get("metrics", {})
+        metrics_callback = utils.create_metrics_overlay_callback(
+            position=metrics_cfg.get("position", "top-left"),
+            font_scale=metrics_cfg.get("font_scale", 0.5),
+            color=tuple(metrics_cfg.get("color", [0, 255, 0])),
+            bg_opacity=metrics_cfg.get("background_opacity", 0.6),
+            show_fps=display_cfg.get("show_fps", True),
+            show_detections=metrics_cfg.get("show_detections", True),
+            show_tracked=metrics_cfg.get("show_tracked", True),
+            show_line_counts=metrics_cfg.get("show_line_counts", True),
+            show_roi_info=metrics_cfg.get("show_roi_info", True) and rois_config,
+            show_inference_time=metrics_cfg.get("show_inference_time", True),
+            show_tracking_time=metrics_cfg.get("show_tracking_time", True),
+            show_pool_metrics=metrics_cfg.get("show_pool_metrics", False),
+        )
+        pipeline = pipeline | sv.CallbackStep(metrics_callback)
 
     # Add sink
-    output_path = config.get("output")
-    if output_path:
-        # File sink
+    output_cfg = config.get("output", {})
+    if output_cfg.get("enabled", False):
         pipeline = pipeline | sv.VideoFileSink(
-            output_path=output_path,
+            output_path=output_cfg.get("file_path", "output.mp4"),
             fps=fps,
             width=width,
             height=height,
         )
 
-    # Always add display sink
-    pipeline = pipeline | sv.DisplaySink(window_name="ROI Detection + Line Counter")
+    # Add display sink if enabled
+    if display_cfg.get("enabled", True):
+        window_name = display_cfg.get("window_name") or "ROI Detection + Line Counter"
+        pipeline = pipeline | sv.DisplaySink(window_name=window_name)
 
     # Run pipeline
     print("Starting pipeline... Press 'q' to quit\n")
@@ -555,7 +472,6 @@ def main():
     print(f"Workers Active:       {detector_metrics['workers_active']}")
 
     # Print tracker metrics
-    import utils
     tracker_metrics = tracker.get_metrics()
     utils.print_tracker_metrics(tracker_metrics)
 

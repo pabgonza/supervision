@@ -43,13 +43,11 @@ Strategies:
 """
 
 import argparse
-import time
 
 import cv2
-import numpy as np
-import supervision as sv
-
 import utils
+
+import supervision as sv
 
 
 def create_metrics_overlay_callback(detector):
@@ -171,11 +169,11 @@ def run_single_strategy(
     # Add sink(s)
     if output_path:
         pipeline = pipeline | sv.MultiSink([
-            sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False),
+            sv.DisplaySink(f"Async Detection - {strategy_name}"),
             sv.VideoFileSink(output_path)
         ])
     else:
-        pipeline = pipeline | sv.DisplaySink(f"Async Detection - {strategy_name}", show_fps=False)
+        pipeline = pipeline | sv.DisplaySink(f"Async Detection - {strategy_name}")
 
     try:
         for data in pipeline:

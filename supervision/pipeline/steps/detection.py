@@ -144,6 +144,7 @@ class YOLODetectionStep(DetectionStep):
         verbose: bool = False,
         input_key: str = "frame",
         output_key: str = "detections",
+        metrics_key: str = "yolo_metrics",
     ):
         """
         Initialize YOLO detection step.
@@ -155,6 +156,7 @@ class YOLODetectionStep(DetectionStep):
             verbose: Whether to print verbose output
             input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store detections in data dict (default: 'detections')
+            metrics_key: Key to store timing metrics in data dict (default: 'yolo_metrics')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
@@ -173,11 +175,12 @@ class YOLODetectionStep(DetectionStep):
         self.conf = conf
         self.iou = iou
         self.verbose = verbose
+        self.metrics_key = metrics_key
 
         # Load model (device auto-detected by ultralytics)
         self.model = YOLO(model_path)
 
-    def _run_inference(self, frame: np.ndarray) -> Detections:
+    def _run_inference(self, frame: np.ndarray) -> tuple[Detections, dict]:
         """
         Run YOLO inference on frame.
 
@@ -185,7 +188,7 @@ class YOLODetectionStep(DetectionStep):
             frame: Input frame for detection
 
         Returns:
-            Detections object with detection results
+            Tuple of (Detections object, speed metrics dict)
         """
         # Run inference
         results = self.model.predict(
@@ -193,7 +196,33 @@ class YOLODetectionStep(DetectionStep):
         )
 
         # Convert to supervision Detections
-        return Detections.from_ultralytics(results[0])
+        detections = Detections.from_ultralytics(results[0])
+
+        # Extract speed metrics from Ultralytics
+        speed = results[0].speed  # dict: {'preprocess': X, 'inference': Y, 'postprocess': Z}
+
+        return detections, speed
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Process frame with object detection and timing metrics.
+
+        Args:
+            data: Pipeline data containing input frame
+
+        Returns:
+            Data with detections and metrics fields added
+        """
+        frame = data.get(self.input_key)
+        if frame is None:
+            return data
+
+        # Run inference
+        detections, speed = self._run_inference(frame)
+        data[self.output_key] = detections
+        data[self.metrics_key] = speed
+
+        return data
 
 
 class DetectionStrategy(Enum):

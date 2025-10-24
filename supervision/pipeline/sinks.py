@@ -22,7 +22,7 @@ class DisplaySink(PipelineSink):
         pipeline = (
             sv.Pipeline(source)
             | sv.FPSCalculatorStep()
-            | sv.DisplaySink("Video", show_fps=True)
+            | sv.DisplaySink("Video")
         )
         pipeline.run()
         ```
@@ -31,23 +31,24 @@ class DisplaySink(PipelineSink):
     def __init__(
         self,
         window_name: str = "Pipeline",
-        show_fps: bool = False,
         wait_key: int = 1,
         window_mode: int = cv2.WINDOW_AUTOSIZE,
+        input_key: str = "frame",
     ):
         """
         Initialize display sink.
 
         Args:
             window_name: Name of the display window
-            show_fps: Whether to show FPS on the frame
             wait_key: Delay in milliseconds for cv2.waitKey (1 = real-time)
             window_mode: Window mode (cv2.WINDOW_AUTOSIZE or cv2.WINDOW_NORMAL)
+            input_key: Key in data dict containing frame to display
+                (default: 'frame')
         """
         self.window_name = window_name
-        self.show_fps = show_fps
         self.wait_key = wait_key
         self.window_mode = window_mode
+        self.input_key = input_key
         self.stopped = False
 
         cv2.namedWindow(self.window_name, self.window_mode)
@@ -57,7 +58,7 @@ class DisplaySink(PipelineSink):
         Display frame.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing frame
 
         Returns:
             False to stop, True to continue
@@ -65,22 +66,9 @@ class DisplaySink(PipelineSink):
         if self.stopped:
             return False
 
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is None:
             return
-
-        # Add FPS overlay if requested
-        if self.show_fps and "fps" in data:
-            fps = data["fps"]
-            cv2.putText(
-                frame,
-                f"FPS: {fps:.1f}",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1.0,
-                (0, 255, 0),
-                2,
-            )
 
         cv2.imshow(self.window_name, frame)
 
@@ -120,6 +108,7 @@ class VideoFileSink(PipelineSink):
         width: int = 1920,
         height: int = 1080,
         codec: str = "mp4v",
+        input_key: str = "frame",
     ):
         """
         Initialize video file sink.
@@ -130,8 +119,11 @@ class VideoFileSink(PipelineSink):
             width: Video width
             height: Video height
             codec: Video codec (FOURCC code)
+            input_key: Key in data dict containing frame to save
+                (default: 'frame')
         """
         self.output_path = output_path
+        self.input_key = input_key
         video_info = VideoInfo(width=width, height=height, fps=fps)
         self.video_sink = SVVideoSink(
             target_path=output_path, video_info=video_info, codec=codec
@@ -143,12 +135,12 @@ class VideoFileSink(PipelineSink):
         Write frame to video file.
 
         Args:
-            data: Pipeline data containing 'frame'
+            data: Pipeline data containing frame
 
         Returns:
             None to continue
         """
-        frame = data.get("frame")
+        frame = data.get(self.input_key)
         if frame is not None:
             self.video_sink.write_frame(frame)
         return None

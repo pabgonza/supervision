@@ -25,7 +25,6 @@ Usage:
 import argparse
 
 import supervision as sv
-
 import utils
 
 
@@ -118,47 +117,26 @@ def main():
 
     # Add metrics overlay if requested
     if args.show_metrics:
-
-        def add_metrics_overlay(data):
-            """Add metrics text overlay to frame."""
-            import cv2
-
-            frame = data.get("frame")
-            if frame is None:
-                return data
-
-            metrics = detector.get_metrics()
-            queue_current, queue_max = detector.get_queue_size()
-
-            # Create metrics text
-            lines = [
-                f"Workers: {metrics['workers_active']}",
-                f"Processed: {metrics['frames_processed']}",
-                f"Dropped: {metrics['frames_dropped']}",
-                f"Queue: {queue_current}/{queue_max}",
-                f"Avg Inference: {metrics['avg_inference_time_ms']:.1f}ms",
-                f"Avg Queue Time: {metrics['avg_queue_time_ms']:.1f}ms",
-                f"Reordered: {metrics['frames_reordered']}",
-            ]
-
-            # Draw text on frame
-            y_offset = 30
-            for line in lines:
-                cv2.putText(
-                    frame,
-                    line,
-                    (10, y_offset),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (0, 255, 0),
-                    2,
-                )
-                y_offset += 25
-
-            data["frame"] = frame
+        metrics_callback = utils.create_metrics_overlay_callback(
+            position="top-left",
+            font_scale=0.6,
+            color=(0, 255, 0),
+            bg_opacity=0.6,
+            show_fps=False,
+            show_detections=True,
+            show_tracked=False,
+            show_line_counts=False,
+            show_roi_info=False,
+            show_inference_time=True,
+            show_tracking_time=False,
+            show_pool_metrics=True,
+        )
+        # Pass detector reference in data for pool metrics
+        def add_detector_to_data(data):
+            data["pool_detector"] = detector
             return data
 
-        pipeline = pipeline | sv.CallbackStep(add_metrics_overlay)
+        pipeline = pipeline | sv.CallbackStep(add_detector_to_data) | sv.CallbackStep(metrics_callback)
 
     # Add sink(s)
     sink = utils.create_sink_from_args(args, "Pool Detection", fps, width, height)

@@ -6,7 +6,12 @@ to ensure consistent interfaces across all pipeline examples.
 """
 
 import argparse
+import json
+import os
+from pathlib import Path
 from typing import Optional, Union
+
+import yaml
 
 import supervision as sv
 
@@ -103,6 +108,54 @@ def add_fps_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def create_source(
+    source_str: str,
+    camera_id: int = 0,
+    width: Optional[int] = None,
+    height: Optional[int] = None
+) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
+    """
+    Create video source automatically detecting the type.
+
+    Detects source type based on string pattern:
+    - RTSP/HTTP streams: starts with 'rtsp://' or 'http://'
+    - Video files: existing file path
+    - Webcam ID: numeric string ('0', '1', etc.)
+    - Stream: fallback for other cases
+
+    Args:
+        source_str: Source string (URL, file path, or camera ID)
+        camera_id: Camera ID for webcam (used only if source_str is numeric)
+        width: Optional width for webcam
+        height: Optional height for webcam
+
+    Returns:
+        Appropriate supervision source
+
+    Examples:
+        >>> create_source('rtsp://192.168.1.100:554/stream')
+        StreamSource(...)
+        >>> create_source('video.mp4')
+        VideoFileSource('video.mp4')
+        >>> create_source('0')
+        WebcamSource(camera_id=0)
+    """
+    if source_str.startswith("rtsp://") or source_str.startswith("http://"):
+        return sv.StreamSource(source_str)
+    elif os.path.isfile(source_str):
+        return sv.VideoFileSource(source_str)
+    elif source_str.isdigit():
+        cam_id = int(source_str)
+        webcam_kwargs = {"camera_id": cam_id}
+        if width is not None:
+            webcam_kwargs["width"] = width
+        if height is not None:
+            webcam_kwargs["height"] = height
+        return sv.WebcamSource(**webcam_kwargs)
+    else:
+        return sv.StreamSource(source_str)
+
+
 def create_source_from_args(args: argparse.Namespace) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
     """
     Create supervision source from parsed arguments.
@@ -169,7 +222,6 @@ def create_sink_from_args(
         For best results, pass the actual fps/width/height from your source.
         Defaults work for most 720p streams at 30fps.
     """
-    show_fps = getattr(args, "show_fps", False)
     output = getattr(args, "output", None)
     no_display = getattr(args, "no_display", False)
 
@@ -185,7 +237,7 @@ def create_sink_from_args(
 
     # Both display and save
     elif output:
-        sinks = [sv.DisplaySink(window_name, show_fps=show_fps)]
+        sinks = [sv.DisplaySink(window_name)]
         sinks.append(sv.VideoFileSink(
             output_path=output,
             fps=fps,
@@ -197,7 +249,7 @@ def create_sink_from_args(
 
     # Only display
     else:
-        return sv.DisplaySink(window_name, show_fps=show_fps)
+        return sv.DisplaySink(window_name)
 
 
 def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]) -> tuple:
@@ -214,7 +266,7 @@ def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource
 
     try:
         # Access the underlying VideoCapture object
-        cap = source.cap if hasattr(source, 'cap') else None
+        cap = source.capture.cap if hasattr(source, "capture") else None
 
         if cap is not None and cap.isOpened():
             # Get properties from VideoCapture
@@ -229,12 +281,58 @@ def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource
                 width, height = 1280, 720
 
             return int(fps), width, height
-    except Exception as e:
+    except Exception:
         # If anything fails, return defaults
         pass
 
     # Fallback to reasonable defaults
     return 30, 1280, 720
+
+
+def get_video_info_with_fallbacks(
+    source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource],
+    fallback_fps: int = 30,
+    fallback_resolution: tuple = (1920, 1080)
+) -> tuple:
+    """
+    Get video information with configurable fallback values.
+
+    Similar to get_video_info_from_source but allows custom fallback values.
+    Validates FPS is in reasonable range (1-120) and resolution is positive.
+
+    Args:
+        source: Supervision source
+        fallback_fps: FPS to use if unable to read or invalid (default: 30)
+        fallback_resolution: (width, height) to use if unable to read (default: 1920x1080)
+
+    Returns:
+        Tuple of (fps, width, height)
+
+    Examples:
+        >>> source = sv.StreamSource('rtsp://camera/stream')
+        >>> fps, w, h = get_video_info_with_fallbacks(source, fallback_fps=60)
+    """
+    import cv2
+
+    try:
+        cap = source.capture.cap if hasattr(source, "capture") else None
+
+        if cap is not None and cap.isOpened():
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+            # Validate and apply fallbacks
+            if fps <= 0 or fps > 120:
+                fps = fallback_fps
+            if width <= 0 or height <= 0:
+                width, height = fallback_resolution
+
+            return int(fps), width, height
+    except Exception:
+        pass
+
+    return fallback_fps, fallback_resolution[0], fallback_resolution[1]
 
 
 def print_source_info(args: argparse.Namespace) -> None:
@@ -287,6 +385,34 @@ def print_tracker_metrics(metrics: dict, title: str = "Tracking Metrics") -> Non
     print(f"Max Tracking Time:    {metrics['max_processing_time_ms']:.2f} ms")
     print(f"Total Tracking Time:  {metrics['total_processing_time_s']:.2f} s")
     print("=" * 60)
+
+
+def load_yaml_config(config_path: str) -> dict:
+    """
+    Load configuration from YAML file.
+
+    Args:
+        config_path: Path to YAML configuration file
+
+    Returns:
+        Dictionary with configuration
+
+    Raises:
+        FileNotFoundError: If config file doesn't exist
+        yaml.YAMLError: If config file is invalid
+
+    Examples:
+        >>> config = load_yaml_config('config.yaml')
+        >>> print(config['model'])
+    """
+    config_file = Path(config_path)
+    if not config_file.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_file) as f:
+        config = yaml.safe_load(f)
+
+    return config
 
 
 def get_tracker_step(pipeline) -> Optional[sv.ByteTrackerStep]:
@@ -416,3 +542,356 @@ def create_line_extract_callback():
         return data
 
     return extract_line_counts
+
+
+def create_metrics_overlay_callback(
+    position: str = "top-left",
+    font_scale: float = 0.5,
+    color: tuple = (0, 255, 0),
+    bg_opacity: float = 0.6,
+    line_spacing: float = 1.5,
+    show_fps: bool = True,
+    show_detections: bool = True,
+    show_tracked: bool = True,
+    show_line_counts: bool = True,
+    show_roi_info: bool = True,
+    show_inference_time: bool = True,
+    show_tracking_time: bool = True,
+    show_pool_metrics: bool = False,
+    frame_counter: Optional[dict] = None,
+):
+    """
+    Create configurable metrics overlay callback.
+
+    Args:
+        position: Position of overlay ("top-left", "top-right", "bottom-left", "bottom-right")
+        font_scale: Font scale for text (default: 0.5)
+        color: Text color in BGR format (default: green (0, 255, 0))
+        bg_opacity: Background opacity 0.0-1.0 (default: 0.6)
+        line_spacing: Spacing multiplier between lines (default: 1.5)
+        show_fps: Show FPS counter
+        show_detections: Show number of detections
+        show_tracked: Show number of tracked objects
+        show_line_counts: Show line crossing counts (if line_zone present)
+        show_roi_info: Show ROI dimensions and offset (if ROI present)
+        show_inference_time: Show YOLO inference time
+        show_tracking_time: Show tracking time
+        show_pool_metrics: Show pool detector metrics (if PoolYOLODetectionStep present)
+        frame_counter: Dict to track frame count (default: creates new dict)
+
+    Returns:
+        Callback function that adds metrics overlay to frame
+
+    Examples:
+        >>> # Basic usage
+        >>> callback = create_metrics_overlay_callback()
+        >>> pipeline = pipeline | sv.CallbackStep(callback)
+
+        >>> # Custom position, color and spacing
+        >>> callback = create_metrics_overlay_callback(
+        ...     position="top-right",
+        ...     color=(255, 255, 0),  # Cyan in BGR
+        ...     bg_opacity=0.8,
+        ...     line_spacing=2.0  # More space between lines
+        ... )
+
+        >>> # Only show specific metrics
+        >>> callback = create_metrics_overlay_callback(
+        ...     show_fps=True,
+        ...     show_detections=True,
+        ...     show_tracked=False,
+        ...     show_line_counts=True,
+        ...     show_roi_info=False
+        ... )
+    """
+    import cv2
+
+    # Initialize frame counter if not provided
+    if frame_counter is None:
+        frame_counter = {"count": 0}
+
+    def add_metrics_overlay(data):
+        """Add metrics text overlay to frame."""
+        frame = data.get("frame")
+        if frame is None:
+            return data
+
+        # Increment frame counter
+        frame_counter["count"] += 1
+
+        # Collect metrics
+        lines = []
+
+        # Frame count
+        lines.append(f"Frame: {frame_counter['count']}")
+
+        # FPS
+        if show_fps:
+            fps_value = data.get("fps", 0.0)
+            lines.append(f"FPS: {fps_value:.1f}")
+
+        # Detections
+        detections = data.get("detections", sv.Detections.empty())
+        if show_detections:
+            lines.append(f"Detections: {len(detections)}")
+
+        # Tracked objects
+        if show_tracked and detections.tracker_id is not None:
+            num_tracked = len(set(detections.tracker_id[detections.tracker_id >= 0]))
+            lines.append(f"Tracked: {num_tracked}")
+
+        # Line zone counts
+        if show_line_counts:
+            line_zone = data.get("line_zone")
+            if line_zone is not None:
+                lines.append(f"Count IN: {line_zone.in_count}")
+                lines.append(f"Count OUT: {line_zone.out_count}")
+
+        # Inference time
+        if show_inference_time:
+            yolo_metrics = data.get("yolo_metrics", {})
+            if yolo_metrics:
+                total_time = sum(yolo_metrics.values())
+                lines.append(f"Inference: {total_time:.1f}ms")
+
+        # Tracking time
+        if show_tracking_time:
+            tracking_time = data.get("tracker_processing_time_ms", 0.0)
+            lines.append(f"Tracking: {tracking_time:.1f}ms")
+
+        # ROI info
+        if show_roi_info:
+            roi_size = data.get("roi_size")
+            roi_offset = data.get("roi_offset")
+            if roi_size and roi_offset:
+                lines.append(f"ROI: {roi_size[0]}x{roi_size[1]}")
+                lines.append(f"ROI Offset: ({roi_offset[0]},{roi_offset[1]})")
+
+        # Pool detector metrics
+        if show_pool_metrics:
+            pool_detector = data.get("pool_detector")
+            if pool_detector is not None:
+                metrics = pool_detector.get_metrics()
+                queue_current, queue_max = pool_detector.get_queue_size()
+                lines.append(f"Workers: {metrics['workers_active']}")
+                lines.append(f"Queue: {queue_current}/{queue_max}")
+                lines.append(f"Dropped: {metrics['frames_dropped']}")
+
+        # Calculate text dimensions
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        thickness = 1
+        padding = 10
+        line_height = int(25 * font_scale * line_spacing)
+
+        # Calculate background size
+        max_width = 0
+        for line in lines:
+            (text_width, text_height), _ = cv2.getTextSize(
+                line, font, font_scale, thickness
+            )
+            max_width = max(max_width, text_width)
+
+        bg_width = max_width + 2 * padding
+        bg_height = len(lines) * line_height + padding
+
+        # Determine position
+        frame_height, frame_width = frame.shape[:2]
+
+        if position == "top-left":
+            x_start, y_start = 5, 5
+        elif position == "top-right":
+            x_start, y_start = frame_width - bg_width - 5, 5
+        elif position == "bottom-left":
+            x_start, y_start = 5, frame_height - bg_height - 5
+        else:  # bottom-right
+            x_start, y_start = frame_width - bg_width - 5, frame_height - bg_height - 5
+
+        # Draw semi-transparent background
+        overlay = frame.copy()
+        cv2.rectangle(
+            overlay,
+            (x_start, y_start),
+            (x_start + bg_width, y_start + bg_height),
+            (0, 0, 0),
+            -1,
+        )
+        cv2.addWeighted(overlay, bg_opacity, frame, 1 - bg_opacity, 0, frame)
+
+        # Draw text on frame
+        y_offset = y_start + line_height
+        for line in lines:
+            cv2.putText(
+                frame,
+                line,
+                (x_start + padding, y_offset),
+                font,
+                font_scale,
+                color,
+                thickness,
+                cv2.LINE_AA,
+            )
+            y_offset += line_height
+
+        data["frame"] = frame
+        return data
+
+    return add_metrics_overlay
+
+
+def save_metrics_to_json(metrics_data: list, file_path: str) -> None:
+    """
+    Save metrics data to a JSON file.
+
+    Args:
+        metrics_data: List of dictionaries containing frame metrics
+        file_path: Path to output JSON file
+
+    Examples:
+        >>> metrics = [
+        ...     {'frame': 1, 'fps': 30.5, 'detections': 5},
+        ...     {'frame': 2, 'fps': 29.8, 'detections': 3}
+        ... ]
+        >>> save_metrics_to_json(metrics, 'metrics.json')
+    """
+    with open(file_path, "w") as f:
+        json.dump(metrics_data, f, indent=2)
+
+
+def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
+    """
+    Load metrics from JSON file and create plots.
+
+    Creates a multi-panel plot showing FPS, detections, and inference time
+    over the course of the video. Saves the plot as a PNG file with the
+    same name as the JSON file.
+
+    Args:
+        json_path: Path to JSON file containing metrics
+        output_path: Optional custom output path for PNG (default: same as JSON with .png extension)
+
+    Returns:
+        Path to the saved plot image
+
+    Examples:
+        >>> plot_metrics_from_json('metrics.json')
+        'metrics.png'
+
+        >>> plot_metrics_from_json('metrics.json', 'custom_plot.png')
+        'custom_plot.png'
+    """
+    try:
+        import matplotlib.pyplot as plt
+        import numpy as np
+    except ImportError:
+        raise ImportError(
+            "matplotlib is required for plotting. Install with: pip install matplotlib"
+        )
+
+    # Load metrics from JSON
+    with open(json_path) as f:
+        metrics_data = json.load(f)
+
+    if not metrics_data:
+        raise ValueError("No metrics data found in JSON file")
+
+    # Extract data
+    frames = [m["frame"] for m in metrics_data]
+    fps_values = [m.get("fps", 0) for m in metrics_data]
+    detections = [m.get("detections", 0) for m in metrics_data]
+    inference_times = [m.get("inference_time_ms", None) for m in metrics_data]
+
+    # Stabilization threshold
+    stabilization_frame = 200
+
+    # Get stable data (after stabilization period)
+    stable_indices = [i for i, f in enumerate(frames) if f > stabilization_frame]
+    stable_fps = [fps_values[i] for i in stable_indices] if stable_indices else fps_values
+    stable_detections = [detections[i] for i in stable_indices] if stable_indices else detections
+
+    # Determine number of subplots
+    has_inference = any(t is not None for t in inference_times)
+    num_plots = 3 if has_inference else 2
+
+    # Create figure
+    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots))
+    if num_plots == 1:
+        axes = [axes]
+
+    # Plot FPS
+    axes[0].plot(frames, fps_values, linewidth=1.5, color="#2E86DE")
+    axes[0].set_xlabel("Frame")
+    axes[0].set_ylabel("FPS")
+    axes[0].set_title("Frames Per Second Over Time")
+    axes[0].grid(True, alpha=0.3)
+
+    if stable_fps:
+        avg_fps = np.mean(stable_fps)
+        min_fps = np.min(stable_fps)
+        max_fps = np.max(stable_fps)
+        axes[0].axhline(y=avg_fps, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_fps:.1f}")
+        axes[0].axhline(y=min_fps, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_fps:.1f}")
+        axes[0].axhline(y=max_fps, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_fps:.1f}")
+
+    if len(frames) > stabilization_frame:
+        axes[0].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+
+    axes[0].legend()
+
+    # Plot Detections
+    axes[1].plot(frames, detections, linewidth=1.5, color="#10AC84")
+    axes[1].set_xlabel("Frame")
+    axes[1].set_ylabel("Number of Detections")
+    axes[1].set_title("Detections Per Frame")
+    axes[1].grid(True, alpha=0.3)
+
+    if stable_detections:
+        avg_detections = np.mean(stable_detections)
+        min_detections = np.min(stable_detections)
+        max_detections = np.max(stable_detections)
+        axes[1].axhline(y=avg_detections, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_detections:.1f}")
+        axes[1].axhline(y=min_detections, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_detections}")
+        axes[1].axhline(y=max_detections, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_detections}")
+
+    if len(frames) > stabilization_frame:
+        axes[1].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+
+    axes[1].legend()
+
+    # Plot Inference Time if available
+    if has_inference:
+        valid_inference = [(f, t) for f, t in zip(frames, inference_times) if t is not None]
+        if valid_inference:
+            inf_frames, inf_times = zip(*valid_inference)
+            axes[2].plot(inf_frames, inf_times, linewidth=1.5, color="#EE5A6F")
+            axes[2].set_xlabel("Frame")
+            axes[2].set_ylabel("Inference Time (ms)")
+            axes[2].set_title("Inference Time Per Frame")
+            axes[2].grid(True, alpha=0.3)
+
+            stable_inference_indices = [i for i, f in enumerate(inf_frames) if f > stabilization_frame]
+            stable_inference = [inf_times[i] for i in stable_inference_indices] if stable_inference_indices else inf_times
+
+            if stable_inference:
+                avg_inference = np.mean(stable_inference)
+                min_inference = np.min(stable_inference)
+                max_inference = np.max(stable_inference)
+                axes[2].axhline(y=avg_inference, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_inference:.1f}ms")
+                axes[2].axhline(y=min_inference, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_inference:.1f}ms")
+                axes[2].axhline(y=max_inference, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_inference:.1f}ms")
+
+            if len(inf_frames) > stabilization_frame:
+                axes[2].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+
+            axes[2].legend()
+
+    plt.tight_layout()
+
+    # Determine output path
+    if output_path is None:
+        json_file = Path(json_path)
+        output_path = json_file.with_suffix(".png")
+
+    plt.savefig(output_path, dpi=150, bbox_inches="tight")
+    plt.close()
+
+    return str(output_path)
