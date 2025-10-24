@@ -20,7 +20,7 @@ video:
   #   - Webcam:            0 (or 1, 2, etc.)
   # input: rtsp://192.168.18.169:554/live1s3.sdp
   input: rtsp://localhost:8554/mi_camara
-  # input: D:/Trabajo/src/CV/ball_counter/assets/Quilicura_V_20240801_132852_720p.mp4
+  input: D:/Trabajo/src/CV/ball_counter/assets/Quilicura_V_20240801_132852_720p.mp4
   # input: 0
 
   # Fallback FPS when unable to read from source (1-120)
@@ -53,8 +53,8 @@ detector:
 # Multiple ROIs can be defined, each with unique ID
 rois:
   - id: roi_1
-    x: null      # X coordinate of top-left corner (null = center horizontally)
-    y: null      # Y coordinate of top-left corner (null = center vertically)
+    x: 320       # X coordinate of top-left corner
+    y: 20        # Y coordinate of top-left corner
     w: 640       # Width of rectangle
     h: 640       # Height of rectangle
     enabled: true
@@ -116,14 +116,11 @@ display:
   # IMPORTANT: Set to false for production/headless systems
   enabled: true
 
-  # Show FPS counter in window title bar
-  show_fps: true
+  # Custom window name (null = auto-generated)
+  window_name: null
 
   # Show detailed metrics overlay on video
   show_metrics: true
-
-  # Custom window name (null = auto-generated)
-  window_name: null
 
   # Metrics overlay configuration (when show_metrics: true)
   metrics:
@@ -142,6 +139,7 @@ display:
     background_opacity: 0.6
 
     # Which metrics to display
+    show_fps: true
     show_detections: true
     show_tracked: true
     show_line_counts: true
@@ -178,4 +176,4 @@ output:
 
   # Video codec FOURCC code
   # Options: "mp4v", "xvid", "h264", "h265"
-  codec: mp4v
+  codec: xvid
