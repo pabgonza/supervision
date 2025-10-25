@@ -120,11 +120,11 @@ def create_source(
     Detects source type based on string pattern:
     - RTSP/HTTP streams: starts with 'rtsp://' or 'http://'
     - Video files: existing file path
-    - Webcam ID: numeric string ('0', '1', etc.)
+    - Webcam ID: numeric string ('0', '1', etc.) or integer
     - Stream: fallback for other cases
 
     Args:
-        source_str: Source string (URL, file path, or camera ID)
+        source_str: Source string (URL, file path, or camera ID). Can be int for webcam.
         camera_id: Camera ID for webcam (used only if source_str is numeric)
         width: Optional width for webcam
         height: Optional height for webcam
@@ -139,7 +139,13 @@ def create_source(
         VideoFileSource('video.mp4')
         >>> create_source('0')
         WebcamSource(camera_id=0)
+        >>> create_source(0)
+        WebcamSource(camera_id=0)
     """
+    # Convert int to string (handles YAML parsing of numeric values)
+    if isinstance(source_str, int):
+        source_str = str(source_str)
+
     if source_str.startswith("rtsp://") or source_str.startswith("http://"):
         return sv.StreamSource(source_str)
     elif os.path.isfile(source_str):
