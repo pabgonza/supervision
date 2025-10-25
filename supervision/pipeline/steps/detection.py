@@ -199,7 +199,9 @@ class YOLODetectionStep(DetectionStep):
         detections = Detections.from_ultralytics(results[0])
 
         # Extract speed metrics from Ultralytics
-        speed = results[0].speed  # dict: {'preprocess': X, 'inference': Y, 'postprocess': Z}
+        speed = results[
+            0
+        ].speed  # dict: {'preprocess': X, 'inference': Y, 'postprocess': Z}
 
         return detections, speed
 
@@ -212,6 +214,161 @@ class YOLODetectionStep(DetectionStep):
 
         Returns:
             Data with detections and metrics fields added
+        """
+        frame = data.get(self.input_key)
+        if frame is None:
+            return data
+
+        # Run inference
+        detections, speed = self._run_inference(frame)
+        data[self.output_key] = detections
+        data[self.metrics_key] = speed
+
+        return data
+
+
+class YOLOTrackingStep(DetectionStep):
+    """
+    Pipeline step for YOLO object detection with integrated tracking using Ultralytics.
+
+    This step combines detection and tracking in a single inference call using YOLO's
+    built-in tracking capabilities. It uses model.track() instead of model.predict(),
+    which internally runs detection and tracking (BoT-SORT or ByteTrack) in one pass.
+
+    This is more efficient than using separate YOLODetectionStep + ByteTrackerStep,
+    as tracking is integrated into the model inference pipeline.
+
+    TODO: Investigar por qué el tracker integrado de Ultralytics hace que las
+    etiquetas de DetectionAnnotatorStep salgan en gris en lugar de blanco cuando
+    se especifica box_color=WHITE y label_color=WHITE. El problema no ocurre con
+    YOLODetectionStep + ByteTrackerStep separados.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        # Using BoT-SORT tracker (default)
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLOTrackingStep("yolov8n.pt", conf=0.5)
+            | sv.TrackerAnnotatorStep()
+            | sv.DisplaySink("Tracking")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Using ByteTrack tracker
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLOTrackingStep("yolov8n.pt", tracker="bytetrack.yaml")
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("ByteTrack")
+        )
+        pipeline.run()
+        ```
+    """
+
+    def __init__(
+        self,
+        model_path: str,
+        conf: float = 0.25,
+        iou: float = 0.45,
+        tracker: str = "botsort.yaml",
+        persist: bool = True,
+        verbose: bool = False,
+        input_key: str = "frame",
+        output_key: str = "detections",
+        metrics_key: str = "yolo_tracking_metrics",
+    ):
+        """
+        Initialize YOLO detection + tracking step.
+
+        Args:
+            model_path: Path to YOLO model file (.pt, .engine, etc.)
+            conf: Confidence threshold for detections
+            iou: IOU threshold for NMS
+            tracker: Tracker configuration file ("botsort.yaml" or "bytetrack.yaml")
+            persist: Persist tracks between frames for continuous tracking
+            verbose: Whether to print verbose output
+            input_key: Key in data dict containing input frame (default: 'frame')
+            output_key: Key to store detections in data dict (default: 'detections')
+            metrics_key: Key to store timing metrics in data dict
+                (default: 'yolo_tracking_metrics')
+
+        Note:
+            Ultralytics automatically detects and uses GPU if CUDA is available.
+            The tracker parameter accepts either "botsort.yaml" (default, more accurate)
+            or "bytetrack.yaml" (faster, lighter).
+        """
+        super().__init__(input_key=input_key, output_key=output_key)
+
+        try:
+            from ultralytics import YOLO
+        except ImportError:
+            raise ImportError(
+                "ultralytics is required for YOLOTrackingStep. "
+                "Install it with: pip install ultralytics"
+            )
+
+        self.model_path = model_path
+        self.conf = conf
+        self.iou = iou
+        self.tracker = tracker
+        self.persist = persist
+        self.verbose = verbose
+        self.metrics_key = metrics_key
+
+        # Load model (device auto-detected by ultralytics)
+        self.model = YOLO(model_path)
+
+    def _run_inference(self, frame: np.ndarray) -> tuple[Detections, dict]:
+        """
+        Run YOLO detection and tracking on frame.
+
+        Args:
+            frame: Input frame for detection and tracking
+
+        Returns:
+            Tuple of (Detections object with tracker_id field, speed metrics dict)
+        """
+        # Run inference with tracking
+        results = self.model.track(
+            source=frame,
+            conf=self.conf,
+            iou=self.iou,
+            tracker=self.tracker,
+            persist=self.persist,
+            verbose=self.verbose,
+        )
+
+        # Convert to supervision Detections (tracker_id extracted automatically)
+        detections = Detections.from_ultralytics(results[0])
+
+        # Garantizar que tracker_id nunca sea None (consistente con ByteTrackerStep)
+        if detections.tracker_id is None:
+            if len(detections) > 0:
+                # Hay detecciones pero sin IDs asignados (primeros frames del tracker)
+                # Llenar con -1 para mantener correspondencia 1:1
+                detections.tracker_id = np.full(len(detections), -1, dtype=int)
+            else:
+                # No hay detecciones - array vacío
+                detections.tracker_id = np.array([], dtype=int)
+
+        # Extract speed metrics from Ultralytics
+        speed = results[0].speed
+
+        return detections, speed
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Process frame with object detection and tracking.
+
+        Args:
+            data: Pipeline data containing input frame
+
+        Returns:
+            Data with detections (including tracker_id) and metrics fields added
         """
         frame = data.get(self.input_key)
         if frame is None:

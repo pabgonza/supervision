@@ -17,6 +17,7 @@ from supervision.pipeline.steps.detection import (
     PoolDetectorStep,
     PoolYOLODetectionStep,
     YOLODetectionStep,
+    YOLOTrackingStep,
 )
 from supervision.pipeline.steps.roi import (
     CoordinateTranslationStep,
@@ -43,6 +44,7 @@ __all__ = [
     "PoolDetectorStep",
     "PoolYOLODetectionStep",
     "YOLODetectionStep",
+    "YOLOTrackingStep",
     # Annotation steps
     "BoxAnnotatorStep",
     "DetectionAnnotatorStep",

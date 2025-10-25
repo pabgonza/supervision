@@ -155,6 +155,7 @@ from supervision.pipeline import (
     VideoFileSource,
     WebcamSource,
     YOLODetectionStep,
+    YOLOTrackingStep,
 )
 from supervision.tracker.byte_tracker.core import ByteTrack
 from supervision.utils.capture import (
@@ -279,6 +280,7 @@ __all__ = [
     "WebcamSource",
     "WebcamVideoCapture",
     "YOLODetectionStep",
+    "YOLOTrackingStep",
     "approximate_polygon",
     "box_iou",
     "box_iou_batch",

@@ -43,6 +43,7 @@ from supervision.pipeline.steps import (
     TrackerAnnotatorStep,
     TransformStep,
     YOLODetectionStep,
+    YOLOTrackingStep,
 )
 
 __all__ = [
@@ -88,4 +89,5 @@ __all__ = [
     "VideoFileSource",
     "WebcamSource",
     "YOLODetectionStep",
+    "YOLOTrackingStep",
 ]
