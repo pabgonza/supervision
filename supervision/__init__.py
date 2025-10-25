@@ -123,6 +123,7 @@ from supervision.pipeline import (
     ByteTrackerStep,
     CallbackSink,
     CallbackStep,
+    CentroidTrackerStep,
     CoordinateTranslationStep,
     DebugLoggerStep,
     DetectionAnnotatorStep,
@@ -147,6 +148,7 @@ from supervision.pipeline import (
     ResizeStep,
     ROIExtractionStep,
     ROIVisualizationStep,
+    SORTTrackerStep,
     StreamSource,
     TraceAnnotatorStep,
     TrackerAnnotatorStep,
@@ -158,6 +160,8 @@ from supervision.pipeline import (
     YOLOTrackingStep,
 )
 from supervision.tracker.byte_tracker.core import ByteTrack
+from supervision.tracker.centroid.core import CentroidTracker
+from supervision.tracker.sort.core import SORT
 from supervision.utils.capture import (
     FileVideoCapture,
     StreamCapture,
@@ -200,6 +204,8 @@ __all__ = [
     "CSVSink",
     "CallbackSink",
     "CallbackStep",
+    "CentroidTracker",
+    "CentroidTrackerStep",
     "CircleAnnotator",
     "ClassificationDataset",
     "Classifications",
@@ -264,6 +270,8 @@ __all__ = [
     "ResizeStep",
     "RichLabelAnnotator",
     "RoundBoxAnnotator",
+    "SORT",
+    "SORTTrackerStep",
     "StreamCapture",
     "StreamSource",
     "TraceAnnotator",

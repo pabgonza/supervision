@@ -265,3 +265,239 @@ class LineZoneStep:
         self.line_zone._in_count_per_class.clear()
         self.line_zone._out_count_per_class.clear()
         self.line_zone.crossing_state_history.clear()
+
+
+class SORTTrackerStep:
+    """
+    Pipeline step for object tracking using SORT (Simple Online and Realtime Tracking).
+
+    SORT uses Kalman filtering for state prediction and Hungarian algorithm
+    for data association. It's simpler and faster than ByteTrack but may be
+    less robust in crowded scenes.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt", conf=0.5)
+            | sv.SORTTrackerStep()
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("SORT Tracking")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom tracker configuration
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | yolo_step
+            | sv.SORTTrackerStep(
+                max_age=30,
+                min_hits=3,
+                iou_threshold=0.3
+            )
+            | sv.TrackerAnnotatorStep(class_names=yolo_step.model.names)
+            | sv.DisplaySink("SORT Tracking")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        max_age: int = 30,
+        min_hits: int = 3,
+        iou_threshold: float = 0.3,
+        detections_key: str = "detections",
+        metrics_key: str = "tracker_metrics",
+    ):
+        """
+        Initialize SORT tracking step.
+
+        Args:
+            max_age: Maximum number of frames to keep alive a track without detections.
+            min_hits: Minimum number of associated detections before track is confirmed.
+            iou_threshold: Minimum IoU for matching detections to tracks.
+            detections_key: Key in data dict containing Detections object
+                (default: 'detections')
+            metrics_key: Key to store timing metrics in data dict
+                (default: 'tracker_metrics')
+        """
+        from supervision.tracker.sort import SORT
+
+        self.detections_key = detections_key
+        self.metrics_key = metrics_key
+        self.tracker = SORT(
+            max_age=max_age,
+            min_hits=min_hits,
+            iou_threshold=iou_threshold,
+        )
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Track detections across frames.
+
+        Args:
+            data: Pipeline data containing detections
+
+        Returns:
+            Data with updated detections containing tracker_id field
+        """
+        detections = data.get(self.detections_key)
+
+        if detections is None or len(detections) == 0:
+            data[self.metrics_key] = {"processing_time_ms": 0.0}
+            return data
+
+        # Measure processing time
+        start_time = time.perf_counter()
+
+        # Update tracker with detections
+        tracked_detections = self.tracker.update_with_detections(detections)
+
+        # Calculate elapsed time
+        elapsed_time = time.perf_counter() - start_time
+
+        # Update data with tracked detections
+        data[self.detections_key] = tracked_detections
+
+        # Add tracking metrics to data dict
+        data[self.metrics_key] = {"processing_time_ms": elapsed_time * 1000}
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if detections exist."""
+        return self.detections_key in data
+
+    def reset(self) -> None:
+        """
+        Reset the tracker state.
+
+        Useful when processing multiple videos sequentially or when you need
+        to restart tracking from scratch.
+        """
+        self.tracker.reset()
+
+
+class CentroidTrackerStep:
+    """
+    Pipeline step for object tracking using centroid-based tracking.
+
+    Tracks objects by computing Euclidean distances between centroids of
+    detections across frames. Simple and fast but less robust than Kalman-based
+    trackers in handling occlusions and complex motion patterns.
+
+    Examples:
+        ```python
+        import supervision as sv
+
+        pipeline = (
+            sv.Pipeline(sv.WebcamSource())
+            | sv.YOLODetectionStep("yolov8n.pt", conf=0.5)
+            | sv.CentroidTrackerStep()
+            | sv.BoxAnnotatorStep()
+            | sv.DisplaySink("Centroid Tracking")
+        )
+        pipeline.run()
+        ```
+
+        ```python
+        # Custom tracker configuration
+        import supervision as sv
+
+        yolo_step = sv.YOLODetectionStep("yolov8n.pt")
+
+        pipeline = (
+            sv.Pipeline(sv.VideoFileSource("video.mp4"))
+            | yolo_step
+            | sv.CentroidTrackerStep(
+                max_disappeared=50,
+                max_distance=100.0
+            )
+            | sv.TrackerAnnotatorStep(class_names=yolo_step.model.names)
+            | sv.DisplaySink("Centroid Tracking")
+        )
+        ```
+    """
+
+    def __init__(
+        self,
+        max_disappeared: int = 30,
+        max_distance: float = 50.0,
+        detections_key: str = "detections",
+        metrics_key: str = "tracker_metrics",
+    ):
+        """
+        Initialize centroid tracking step.
+
+        Args:
+            max_disappeared: Maximum number of frames a track can disappear
+                before being deregistered.
+            max_distance: Maximum Euclidean distance for associating detections
+                to existing tracks.
+            detections_key: Key in data dict containing Detections object
+                (default: 'detections')
+            metrics_key: Key to store timing metrics in data dict
+                (default: 'tracker_metrics')
+        """
+        from supervision.tracker.centroid import CentroidTracker
+
+        self.detections_key = detections_key
+        self.metrics_key = metrics_key
+        self.tracker = CentroidTracker(
+            max_disappeared=max_disappeared,
+            max_distance=max_distance,
+        )
+
+    def process(self, data: dict[str, Any]) -> dict[str, Any]:
+        """
+        Track detections across frames.
+
+        Args:
+            data: Pipeline data containing detections
+
+        Returns:
+            Data with updated detections containing tracker_id field
+        """
+        detections = data.get(self.detections_key)
+
+        if detections is None or len(detections) == 0:
+            data[self.metrics_key] = {"processing_time_ms": 0.0}
+            return data
+
+        # Measure processing time
+        start_time = time.perf_counter()
+
+        # Update tracker with detections
+        tracked_detections = self.tracker.update_with_detections(detections)
+
+        # Calculate elapsed time
+        elapsed_time = time.perf_counter() - start_time
+
+        # Update data with tracked detections
+        data[self.detections_key] = tracked_detections
+
+        # Add tracking metrics to data dict
+        data[self.metrics_key] = {"processing_time_ms": elapsed_time * 1000}
+
+        return data
+
+    def filter(self, data: dict[str, Any]) -> bool:
+        """Process if detections exist."""
+        return self.detections_key in data
+
+    def reset(self) -> None:
+        """
+        Reset the tracker state.
+
+        Useful when processing multiple videos sequentially or when you need
+        to restart tracking from scratch.
+        """
+        self.tracker.reset()

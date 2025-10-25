@@ -24,7 +24,12 @@ from supervision.pipeline.steps.roi import (
     ROIExtractionStep,
     ROIVisualizationStep,
 )
-from supervision.pipeline.steps.tracking import ByteTrackerStep, LineZoneStep
+from supervision.pipeline.steps.tracking import (
+    ByteTrackerStep,
+    CentroidTrackerStep,
+    LineZoneStep,
+    SORTTrackerStep,
+)
 from supervision.pipeline.steps.transform import (
     CallbackStep,
     DetectionFilterStep,
@@ -54,7 +59,9 @@ __all__ = [
     "TrackerAnnotatorStep",
     # Tracking steps
     "ByteTrackerStep",
+    "CentroidTrackerStep",
     "LineZoneStep",
+    "SORTTrackerStep",
     # ROI steps
     "CoordinateTranslationStep",
     "ROIExtractionStep",
