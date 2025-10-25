@@ -30,6 +30,7 @@ Usage:
 
 import argparse
 import logging
+from copy import deepcopy
 
 import utils
 
@@ -208,6 +209,14 @@ def main():
         output_key="detections",
     )
 
+    # Copy all detections before tracking (tracker filters them)
+    def copy_all_detections(data):
+        if "detections" in data:
+            data["all_detections"] = deepcopy(data["detections"])
+        return data
+
+    copy_detections_step = sv.CallbackStep(copy_all_detections)
+
     # Object tracking
     tracker_step = sv.ByteTrackerStep(
         track_activation_threshold=tracker_cfg.get("track_activation_threshold", 0.25),
@@ -231,6 +240,7 @@ def main():
         | roi_step
         | yolo_step
         | coord_translate
+        | copy_detections_step
         | tracker_step
         | line_zone_step
     )
@@ -249,6 +259,18 @@ def main():
             height=roi_h,
             color=(255, 255, 0),
             thickness=2,
+            copy_frame=False
+        )
+
+        # Draw all detections in white (before tracking filtered them)
+        pipeline = pipeline | sv.DetectionAnnotatorStep(
+            detections_key="all_detections",
+            class_names=yolo_step.model.names,
+            box_color=sv.Color.WHITE,
+            box_thickness=1,
+            label_color=sv.Color.WHITE,
+            show_class=True,
+            show_confidence=True,
             copy_frame=False
         )
 
@@ -333,6 +355,7 @@ def main():
             # Save metrics if requested
             if args.save_metrics:
                 line_zone = data.get("line_zone")
+                all_detections = data.get("all_detections")
                 detections = data.get("detections")
                 if detections and detections.tracker_id is not None:
                     valid_ids = detections.tracker_id[detections.tracker_id >= 0]
@@ -342,7 +365,7 @@ def main():
                 frame_metrics = {
                     "frame": frame_count,
                     "fps": data.get("fps", 0.0),
-                    "detections": len(detections) if detections else 0,
+                    "detections": len(all_detections) if all_detections else 0,
                     "tracked_objects": tracked_count,
                     "line_in_count": line_zone.in_count if line_zone else 0,
                     "line_out_count": line_zone.out_count if line_zone else 0,
@@ -354,9 +377,9 @@ def main():
                     frame_metrics["inference_time_ms"] = sum(yolo_metrics.values())
 
                 # Add tracking time if available
-                tracking_time = data.get("tracker_processing_time_ms")
-                if tracking_time:
-                    frame_metrics["tracking_time_ms"] = tracking_time
+                tracker_metrics = data.get("tracker_metrics", {})
+                if tracker_metrics and "processing_time_ms" in tracker_metrics:
+                    frame_metrics["tracking_time_ms"] = tracker_metrics["processing_time_ms"]
 
                 metrics_data.append(frame_metrics)
 

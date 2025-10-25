@@ -368,25 +368,6 @@ def print_source_info(args: argparse.Namespace) -> None:
     print("Press 'q' or ESC to quit\n")
 
 
-def print_tracker_metrics(metrics: dict, title: str = "Tracking Metrics") -> None:
-    """
-    Print tracking performance metrics in a formatted table.
-
-    Args:
-        metrics: Dictionary from ByteTrackerStep.get_metrics()
-        title: Title for the metrics section (default: "Tracking Metrics")
-    """
-    print("\n" + "=" * 60)
-    print(title)
-    print("=" * 60)
-    print(f"Frames Processed:     {metrics['frames_processed']}")
-    print(f"Avg Tracking Time:    {metrics['avg_processing_time_ms']:.2f} ms")
-    print(f"Min Tracking Time:    {metrics['min_processing_time_ms']:.2f} ms")
-    print(f"Max Tracking Time:    {metrics['max_processing_time_ms']:.2f} ms")
-    print(f"Total Tracking Time:  {metrics['total_processing_time_s']:.2f} s")
-    print("=" * 60)
-
-
 def load_yaml_config(config_path: str) -> dict:
     """
     Load configuration from YAML file.
@@ -413,26 +394,6 @@ def load_yaml_config(config_path: str) -> dict:
         config = yaml.safe_load(f)
 
     return config
-
-
-def get_tracker_step(pipeline) -> Optional[sv.ByteTrackerStep]:
-    """
-    Get ByteTrackerStep from a pipeline.
-
-    Args:
-        pipeline: Supervision pipeline object
-
-    Returns:
-        ByteTrackerStep instance if found, None otherwise
-    """
-    if not hasattr(pipeline, "_steps"):
-        return None
-
-    for step in pipeline._steps:
-        if isinstance(step, sv.ByteTrackerStep):
-            return step
-
-    return None
 
 
 def parse_point(point_str: str) -> sv.Point:
@@ -630,10 +591,12 @@ def create_metrics_overlay_callback(
             fps_value = data.get("fps", 0.0)
             lines.append(f"FPS: {fps_value:.1f}")
 
-        # Detections
+        # Detections (use all_detections if available, otherwise detections)
+        all_detections = data.get("all_detections")
         detections = data.get("detections", sv.Detections.empty())
         if show_detections:
-            lines.append(f"Detections: {len(detections)}")
+            detection_count = len(all_detections) if all_detections else len(detections)
+            lines.append(f"Detections: {detection_count}")
 
         # Tracked objects
         if show_tracked and detections.tracker_id is not None:
@@ -656,8 +619,10 @@ def create_metrics_overlay_callback(
 
         # Tracking time
         if show_tracking_time:
-            tracking_time = data.get("tracker_processing_time_ms", 0.0)
-            lines.append(f"Tracking: {tracking_time:.1f}ms")
+            tracker_metrics = data.get("tracker_metrics", {})
+            tracking_time = tracker_metrics.get("processing_time_ms", 0.0)
+            if tracking_time > 0:
+                lines.append(f"Tracking: {tracking_time:.1f}ms")
 
         # ROI info
         if show_roi_info:
@@ -799,6 +764,7 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
     fps_values = [m.get("fps", 0) for m in metrics_data]
     detections = [m.get("detections", 0) for m in metrics_data]
     inference_times = [m.get("inference_time_ms", None) for m in metrics_data]
+    tracking_times = [m.get("tracking_time_ms", None) for m in metrics_data]
 
     # Stabilization threshold
     stabilization_frame = 200
@@ -810,16 +776,20 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
 
     # Determine number of subplots
     has_inference = any(t is not None for t in inference_times)
-    num_plots = 3 if has_inference else 2
+    has_tracking = any(t is not None for t in tracking_times)
+    num_plots = 2  # FPS + Detections
+    if has_inference:
+        num_plots += 1
+    if has_tracking:
+        num_plots += 1
 
-    # Create figure
-    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots))
+    # Create figure with shared x-axis
+    fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots), sharex=True)
     if num_plots == 1:
         axes = [axes]
 
     # Plot FPS
     axes[0].plot(frames, fps_values, linewidth=1.5, color="#2E86DE")
-    axes[0].set_xlabel("Frame")
     axes[0].set_ylabel("FPS")
     axes[0].set_title("Frames Per Second Over Time")
     axes[0].grid(True, alpha=0.3)
@@ -839,7 +809,6 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
 
     # Plot Detections
     axes[1].plot(frames, detections, linewidth=1.5, color="#10AC84")
-    axes[1].set_xlabel("Frame")
     axes[1].set_ylabel("Number of Detections")
     axes[1].set_title("Detections Per Frame")
     axes[1].grid(True, alpha=0.3)
@@ -858,15 +827,15 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
     axes[1].legend()
 
     # Plot Inference Time if available
+    current_plot_idx = 2
     if has_inference:
         valid_inference = [(f, t) for f, t in zip(frames, inference_times) if t is not None]
         if valid_inference:
             inf_frames, inf_times = zip(*valid_inference)
-            axes[2].plot(inf_frames, inf_times, linewidth=1.5, color="#EE5A6F")
-            axes[2].set_xlabel("Frame")
-            axes[2].set_ylabel("Inference Time (ms)")
-            axes[2].set_title("Inference Time Per Frame")
-            axes[2].grid(True, alpha=0.3)
+            axes[current_plot_idx].plot(inf_frames, inf_times, linewidth=1.5, color="#EE5A6F")
+            axes[current_plot_idx].set_ylabel("Inference Time (ms)")
+            axes[current_plot_idx].set_title("Inference Time Per Frame")
+            axes[current_plot_idx].grid(True, alpha=0.3)
 
             stable_inference_indices = [i for i, f in enumerate(inf_frames) if f > stabilization_frame]
             stable_inference = [inf_times[i] for i in stable_inference_indices] if stable_inference_indices else inf_times
@@ -875,14 +844,44 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
                 avg_inference = np.mean(stable_inference)
                 min_inference = np.min(stable_inference)
                 max_inference = np.max(stable_inference)
-                axes[2].axhline(y=avg_inference, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_inference:.1f}ms")
-                axes[2].axhline(y=min_inference, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_inference:.1f}ms")
-                axes[2].axhline(y=max_inference, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_inference:.1f}ms")
+                axes[current_plot_idx].axhline(y=avg_inference, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_inference:.1f}ms")
+                axes[current_plot_idx].axhline(y=min_inference, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_inference:.1f}ms")
+                axes[current_plot_idx].axhline(y=max_inference, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_inference:.1f}ms")
 
             if len(inf_frames) > stabilization_frame:
-                axes[2].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+                axes[current_plot_idx].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
 
-            axes[2].legend()
+            axes[current_plot_idx].legend()
+        current_plot_idx += 1
+
+    # Plot Tracking Time if available
+    if has_tracking:
+        valid_tracking = [(f, t) for f, t in zip(frames, tracking_times) if t is not None]
+        if valid_tracking:
+            track_frames, track_times = zip(*valid_tracking)
+            axes[current_plot_idx].plot(track_frames, track_times, linewidth=1.5, color="#A55EEA")
+            axes[current_plot_idx].set_ylabel("Tracking Time (ms)")
+            axes[current_plot_idx].set_title("Tracking Time Per Frame")
+            axes[current_plot_idx].grid(True, alpha=0.3)
+
+            stable_tracking_indices = [i for i, f in enumerate(track_frames) if f > stabilization_frame]
+            stable_tracking = [track_times[i] for i in stable_tracking_indices] if stable_tracking_indices else track_times
+
+            if stable_tracking:
+                avg_tracking = np.mean(stable_tracking)
+                min_tracking = np.min(stable_tracking)
+                max_tracking = np.max(stable_tracking)
+                axes[current_plot_idx].axhline(y=avg_tracking, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_tracking:.1f}ms")
+                axes[current_plot_idx].axhline(y=min_tracking, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_tracking:.1f}ms")
+                axes[current_plot_idx].axhline(y=max_tracking, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_tracking:.1f}ms")
+
+            if len(track_frames) > stabilization_frame:
+                axes[current_plot_idx].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+
+            axes[current_plot_idx].legend()
+
+    # Add x-label to the last subplot
+    axes[-1].set_xlabel("Frame")
 
     plt.tight_layout()
 
