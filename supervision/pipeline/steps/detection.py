@@ -238,6 +238,11 @@ class YOLOTrackingStep(DetectionStep):
     This is more efficient than using separate YOLODetectionStep + ByteTrackerStep,
     as tracking is integrated into the model inference pipeline.
 
+    TODO: Investigar por qué el tracker integrado de Ultralytics hace que las
+    etiquetas de DetectionAnnotatorStep salgan en gris en lugar de blanco cuando
+    se especifica box_color=WHITE y label_color=WHITE. El problema no ocurre con
+    YOLODetectionStep + ByteTrackerStep separados.
+
     Examples:
         ```python
         import supervision as sv
