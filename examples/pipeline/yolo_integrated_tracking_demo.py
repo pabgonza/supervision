@@ -124,6 +124,7 @@ def main():
             trace_length=50,
             trace_thickness=2,
             copy_frame=False,
+            color_lookup=sv.ColorLookup.TRACK,  # Use CLASS instead of TRACK default
         )
     )
 

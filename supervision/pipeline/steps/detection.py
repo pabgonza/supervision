@@ -340,6 +340,16 @@ class YOLOTrackingStep(DetectionStep):
         # Convert to supervision Detections (tracker_id extracted automatically)
         detections = Detections.from_ultralytics(results[0])
 
+        # Garantizar que tracker_id nunca sea None (consistente con ByteTrackerStep)
+        if detections.tracker_id is None:
+            if len(detections) > 0:
+                # Hay detecciones pero sin IDs asignados (primeros frames del tracker)
+                # Llenar con -1 para mantener correspondencia 1:1
+                detections.tracker_id = np.full(len(detections), -1, dtype=int)
+            else:
+                # No hay detecciones - array vacío
+                detections.tracker_id = np.array([], dtype=int)
+
         # Extract speed metrics from Ultralytics
         speed = results[0].speed
 
