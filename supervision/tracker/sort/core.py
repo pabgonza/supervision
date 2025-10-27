@@ -158,8 +158,7 @@ class SORT:
         ]
 
         if len(confirmed_tracks) == 0:
-            detections.tracker_id = np.full(len(detections), -1, dtype=int)
-            return detections
+            return Detections.empty()
 
         # Match detections to confirmed tracks
         track_boxes = np.array([track.tlbr for track in confirmed_tracks])
@@ -177,7 +176,8 @@ class SORT:
                 track_idx
             ].track_id
 
-        return detections
+        # Filter out detections without valid track (consistent with ByteTrack)
+        return detections[detections.tracker_id != -1]
 
     def reset(self) -> None:
         """Reset the tracker state."""

@@ -190,11 +190,11 @@ class CentroidTracker:
         if len(detections) == 0:
             return detections
 
+        if len(self.tracks) == 0:
+            return Detections.empty()
+
         # Initialize tracker_id with -1
         detections.tracker_id = np.full(len(detections), -1, dtype=int)
-
-        if len(self.tracks) == 0:
-            return detections
 
         # Get track centroids
         track_ids = list(self.tracks.keys())
@@ -219,7 +219,8 @@ class CentroidTracker:
                     nearest_track_idx
                 ]
 
-        return detections
+        # Filter out detections without valid track (consistent with ByteTrack)
+        return detections[detections.tracker_id != -1]
 
     def reset(self) -> None:
         """Reset the tracker state."""

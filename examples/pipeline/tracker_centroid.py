@@ -144,6 +144,15 @@ def main():
         verbose=False,
     )
 
+    # Copy all detections before tracking (tracker filters them)
+    def copy_all_detections(data):
+        if "detections" in data:
+            from copy import deepcopy
+            data["all_detections"] = deepcopy(data["detections"])
+        return data
+
+    copy_step = sv.CallbackStep(copy_all_detections)
+
     # Create Centroid tracker step
     tracker_step = sv.CentroidTrackerStep(
         max_disappeared=max_disappeared,
@@ -151,11 +160,31 @@ def main():
     )
 
     # Build pipeline
-    pipeline = sv.Pipeline(source) | yolo_step | tracker_step | sv.FPSCalculatorStep()
+    pipeline = (
+        sv.Pipeline(source)
+        | yolo_step
+        | copy_step
+        | tracker_step
+        | sv.FPSCalculatorStep()
+    )
 
     # Add annotations if needed
     if display_cfg.get("enabled", False) or output_cfg.get("enabled", False):
+        # Draw all detections in white (before tracking filtered them)
+        pipeline = pipeline | sv.DetectionAnnotatorStep(
+            detections_key="all_detections",
+            class_names=yolo_step.model.names,
+            box_color=sv.Color.WHITE,
+            box_thickness=1,
+            label_color=sv.Color.WHITE,
+            show_class=True,
+            show_confidence=True,
+            copy_frame=False,
+        )
+
+        # Draw tracked detections with colors and traces
         pipeline = pipeline | sv.TrackerAnnotatorStep(
+            detections_key="detections",
             class_names=yolo_step.model.names,
             show_tracker_id=True,
             show_class=True,
@@ -163,6 +192,7 @@ def main():
             trace_length=30,
             trace_thickness=2,
             box_thickness=2,
+            copy_frame=False,
         )
 
     # Add sinks

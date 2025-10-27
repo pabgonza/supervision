@@ -226,6 +226,14 @@ def main():
         detections_key="detections",
     )
 
+    # tracker_step = sv.SORTTrackerStep(
+    #         max_age=tracker_cfg.get("lost_track_buffer", 30),
+    #         min_hits=tracker_cfg.get("minimum_consecutive_frames", 3),
+    #         iou_threshold=tracker_cfg.get("minimum_matching_threshold", 0.3),
+    #         detections_key="detections",
+    #     )
+
+
     # Line counting
     line_zone_step = sv.LineZoneStep(
         start=sv.Point(x=line_start[0], y=line_start[1]),

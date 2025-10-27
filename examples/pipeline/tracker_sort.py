@@ -119,8 +119,8 @@ def main():
 
     # SORT tracker parameters
     max_age = args.max_age if args.max_age is not None else 30
-    min_hits = args.min_hits if args.min_hits is not None else 3
-    iou_threshold = args.iou if args.iou is not None else 0.3
+    min_hits = args.min_hits if args.min_hits is not None else 1
+    iou_threshold = args.iou if args.iou is not None else 0.1
 
     print("=" * 60)
     print("SORT Tracker Demo")
@@ -152,6 +152,15 @@ def main():
         verbose=False,
     )
 
+    # Copy all detections before tracking (tracker filters them)
+    def copy_all_detections(data):
+        if "detections" in data:
+            from copy import deepcopy
+            data["all_detections"] = deepcopy(data["detections"])
+        return data
+
+    copy_step = sv.CallbackStep(copy_all_detections)
+
     # Create SORT tracker step
     tracker_step = sv.SORTTrackerStep(
         max_age=max_age,
@@ -160,11 +169,31 @@ def main():
     )
 
     # Build pipeline
-    pipeline = sv.Pipeline(source) | yolo_step | tracker_step | sv.FPSCalculatorStep()
+    pipeline = (
+        sv.Pipeline(source)
+        | yolo_step
+        | copy_step
+        | tracker_step
+        | sv.FPSCalculatorStep()
+    )
 
     # Add annotations if needed
     if display_cfg.get("enabled", False) or output_cfg.get("enabled", False):
+        # Draw all detections in white (before tracking filtered them)
+        pipeline = pipeline | sv.DetectionAnnotatorStep(
+            detections_key="all_detections",
+            class_names=yolo_step.model.names,
+            box_color=sv.Color.WHITE,
+            box_thickness=1,
+            label_color=sv.Color.WHITE,
+            show_class=True,
+            show_confidence=True,
+            copy_frame=False,
+        )
+        
+        # Draw tracked detections with colors and traces
         pipeline = pipeline | sv.TrackerAnnotatorStep(
+            detections_key="detections",
             class_names=yolo_step.model.names,
             show_tracker_id=True,
             show_class=True,
@@ -172,7 +201,10 @@ def main():
             trace_length=30,
             trace_thickness=2,
             box_thickness=2,
+            copy_frame=False,
+            color_lookup=sv.ColorLookup.TRACK
         )
+        
 
     # Add sinks
     sinks = []
