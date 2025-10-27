@@ -103,8 +103,8 @@ tracker:
     # Frames to buffer after losing a track
     lost_track_buffer: 30
 
-    # Minimum detections required to confirm track
-    min_hits: 3
+    # Consecutive frames required to confirm a track
+    minimum_consecutive_frames: 3
 
     # Minimum IoU for matching detections to tracks (0.0 - 1.0)
     # Higher values require more overlap

@@ -19,7 +19,8 @@ class SORT:
 
     Args:
         lost_track_buffer: Number of frames to buffer when a track is lost.
-        min_hits: Minimum number of associated detections before track is confirmed.
+        minimum_consecutive_frames: Minimum number of consecutive frames that an object
+            must be tracked before it is considered a valid track.
         iou_threshold: Minimum IoU for matching detections to tracks (0.0 to 1.0).
             Higher values require more overlap for matching.
     """
@@ -27,11 +28,11 @@ class SORT:
     def __init__(
         self,
         lost_track_buffer: int = 30,
-        min_hits: int = 3,
+        minimum_consecutive_frames: int = 3,
         iou_threshold: float = 0.3,
     ):
         self.max_age = lost_track_buffer
-        self.min_hits = min_hits
+        self.min_hits = minimum_consecutive_frames
         self.iou_threshold = iou_threshold
 
         self.frame_id = 0

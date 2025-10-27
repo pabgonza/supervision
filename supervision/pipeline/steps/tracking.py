@@ -300,7 +300,7 @@ class SORTTrackerStep:
             | yolo_step
             | sv.SORTTrackerStep(
                 lost_track_buffer=30,
-                min_hits=3,
+                minimum_consecutive_frames=3,
                 iou_threshold=0.3
             )
             | sv.TrackerAnnotatorStep(class_names=yolo_step.model.names)
@@ -312,7 +312,7 @@ class SORTTrackerStep:
     def __init__(
         self,
         lost_track_buffer: int = 30,
-        min_hits: int = 3,
+        minimum_consecutive_frames: int = 3,
         iou_threshold: float = 0.3,
         detections_key: str = "detections",
         metrics_key: str = "tracker_metrics",
@@ -322,7 +322,8 @@ class SORTTrackerStep:
 
         Args:
             lost_track_buffer: Number of frames to buffer when a track is lost.
-            min_hits: Minimum number of associated detections before track is confirmed.
+            minimum_consecutive_frames: Minimum number of consecutive frames that an object
+                must be tracked before it is considered a valid track.
             iou_threshold: Minimum IoU for matching detections to tracks.
             detections_key: Key in data dict containing Detections object
                 (default: 'detections')
@@ -335,7 +336,7 @@ class SORTTrackerStep:
         self.metrics_key = metrics_key
         self.tracker = SORT(
             lost_track_buffer=lost_track_buffer,
-            min_hits=min_hits,
+            minimum_consecutive_frames=minimum_consecutive_frames,
             iou_threshold=iou_threshold,
         )
 

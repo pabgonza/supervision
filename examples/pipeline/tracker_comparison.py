@@ -117,7 +117,7 @@ def create_tracker_step(tracker_type, tracker_cfg):
         params = tracker_cfg.get("sort", {})
         return sv.SORTTrackerStep(
             lost_track_buffer=params.get("lost_track_buffer", 30),
-            min_hits=params.get("min_hits", 3),
+            minimum_consecutive_frames=params.get("minimum_consecutive_frames", 3),
             iou_threshold=params.get("iou_threshold", 0.3),
             detections_key="detections",
         )

@@ -53,9 +53,9 @@ def get_args():
     )
 
     parser.add_argument(
-        "--min-hits",
+        "--minimum-consecutive-frames",
         type=int,
-        help="Minimum detections before track is confirmed (default: 3)",
+        help="Consecutive frames to confirm track (default: 3)",
     )
 
     parser.add_argument(
@@ -121,7 +121,9 @@ def main():
     lost_track_buffer = getattr(args, 'lost_track_buffer', None)
     if lost_track_buffer is None:
         lost_track_buffer = 30
-    min_hits = args.min_hits if args.min_hits is not None else 3
+    minimum_consecutive_frames = getattr(args, 'minimum_consecutive_frames', None)
+    if minimum_consecutive_frames is None:
+        minimum_consecutive_frames = 3
     iou_threshold = args.iou if args.iou is not None else 0.3
 
     print("=" * 60)
@@ -132,7 +134,7 @@ def main():
     print(f"Confidence: {detector_cfg.get('confidence_threshold', 0.4)}")
     print(f"SORT Parameters:")
     print(f"  - lost_track_buffer: {lost_track_buffer}")
-    print(f"  - min_hits: {min_hits}")
+    print(f"  - minimum_consecutive_frames: {minimum_consecutive_frames}")
     print(f"  - iou_threshold: {iou_threshold}")
     print("=" * 60)
     print()
@@ -166,7 +168,7 @@ def main():
     # Create SORT tracker step
     tracker_step = sv.SORTTrackerStep(
         lost_track_buffer=lost_track_buffer,
-        min_hits=min_hits,
+        minimum_consecutive_frames=minimum_consecutive_frames,
         iou_threshold=iou_threshold,
     )
 
