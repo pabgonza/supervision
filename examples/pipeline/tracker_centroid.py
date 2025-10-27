@@ -47,9 +47,9 @@ def get_args():
     )
 
     parser.add_argument(
-        "--max-disappeared",
+        "--lost-track-buffer",
         type=int,
-        help="Maximum frames track can disappear (default: 30)",
+        help="Frames to buffer when track is lost (default: 30)",
     )
 
     parser.add_argument(
@@ -112,7 +112,9 @@ def main():
         output_cfg["file_path"] = args.output
 
     # Centroid tracker parameters
-    max_disappeared = args.max_disappeared if args.max_disappeared is not None else 30
+    lost_track_buffer = getattr(args, 'lost_track_buffer', None)
+    if lost_track_buffer is None:
+        lost_track_buffer = 30
     max_distance = args.max_distance if args.max_distance is not None else 50.0
 
     print("=" * 60)
@@ -122,7 +124,7 @@ def main():
     print(f"Model: {detector_cfg.get('model_path')}")
     print(f"Confidence: {detector_cfg.get('confidence_threshold', 0.4)}")
     print(f"Centroid Tracker Parameters:")
-    print(f"  - max_disappeared: {max_disappeared}")
+    print(f"  - lost_track_buffer: {lost_track_buffer}")
     print(f"  - max_distance: {max_distance} pixels")
     print("=" * 60)
     print()
@@ -155,7 +157,7 @@ def main():
 
     # Create Centroid tracker step
     tracker_step = sv.CentroidTrackerStep(
-        max_disappeared=max_disappeared,
+        lost_track_buffer=lost_track_buffer,
         max_distance=max_distance,
     )
 

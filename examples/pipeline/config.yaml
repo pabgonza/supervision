@@ -18,10 +18,10 @@ video:
   #   - RTSP/HTTP streams: rtsp://... or http://...
   #   - Video files:       /path/to/video.mp4
   #   - Webcam:            0 (or 1, 2, etc.)
-  # input: rtsp://192.168.18.169:554/live1s3.sdp
-  # input: rtsp://localhost:8554/mi_camara
-  input: D:/Trabajo/src/CV/ball_counter/assets/Quilicura_V_20240801_132852_720p.mp4
   # input: 0
+  input: D:/Trabajo/src/CV/ball_counter/assets/Quilicura_V_20240801_132852_720p.mp4
+  # input: rtsp://localhost:8554/mi_camara
+  # input: rtsp://192.168.18.169:554/live1s3.sdp
 
   # Fallback FPS when unable to read from source (1-120)
   fallback_fps: 30
@@ -100,8 +100,8 @@ tracker:
 
   # SORT parameters (used when type: sort)
   sort:
-    # Maximum frames to keep track without detections
-    max_age: 30
+    # Frames to buffer after losing a track
+    lost_track_buffer: 30
 
     # Minimum detections required to confirm track
     min_hits: 3
@@ -112,8 +112,8 @@ tracker:
 
   # Centroid parameters (used when type: centroid)
   centroid:
-    # Maximum frames a track can disappear before being deregistered
-    max_disappeared: 30
+    # Frames to buffer after losing a track
+    lost_track_buffer: 30
 
     # Maximum Euclidean distance in pixels for associating detections to tracks
     max_distance: 50.0

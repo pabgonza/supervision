@@ -17,18 +17,17 @@ class CentroidTracker:
     Kalman-based trackers.
 
     Args:
-        max_disappeared: Maximum number of frames a track can disappear
-            before being deregistered.
+        lost_track_buffer: Number of frames to buffer when a track is lost.
         max_distance: Maximum Euclidean distance for associating detections
             to existing tracks.
     """
 
     def __init__(
         self,
-        max_disappeared: int = 30,
+        lost_track_buffer: int = 30,
         max_distance: float = 50.0,
     ):
-        self.max_disappeared = max_disappeared
+        self.max_disappeared = lost_track_buffer
         self.max_distance = max_distance
 
         self.tracks: dict[int, CentroidTrack] = {}

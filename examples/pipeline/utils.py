@@ -957,7 +957,7 @@ def create_tracker_step_from_config(
     elif tracker_type == "sort":
         params = tracker_config.get("sort", {})
         return sv.SORTTrackerStep(
-            max_age=params.get("max_age", 30),
+            lost_track_buffer=params.get("lost_track_buffer", 30),
             min_hits=params.get("min_hits", 3),
             iou_threshold=params.get("iou_threshold", 0.3),
             detections_key=detections_key,
@@ -967,7 +967,7 @@ def create_tracker_step_from_config(
     elif tracker_type == "centroid":
         params = tracker_config.get("centroid", {})
         return sv.CentroidTrackerStep(
-            max_disappeared=params.get("max_disappeared", 30),
+            lost_track_buffer=params.get("lost_track_buffer", 30),
             max_distance=params.get("max_distance", 50.0),
             detections_key=detections_key,
             metrics_key=metrics_key,

@@ -18,7 +18,7 @@ class SORT:
     for data association based on intersection-over-union (IoU) distance.
 
     Args:
-        max_age: Maximum number of frames to keep alive a track without detections.
+        lost_track_buffer: Number of frames to buffer when a track is lost.
         min_hits: Minimum number of associated detections before track is confirmed.
         iou_threshold: Minimum IoU for matching detections to tracks (0.0 to 1.0).
             Higher values require more overlap for matching.
@@ -26,11 +26,11 @@ class SORT:
 
     def __init__(
         self,
-        max_age: int = 30,
+        lost_track_buffer: int = 30,
         min_hits: int = 3,
         iou_threshold: float = 0.3,
     ):
-        self.max_age = max_age
+        self.max_age = lost_track_buffer
         self.min_hits = min_hits
         self.iou_threshold = iou_threshold
 

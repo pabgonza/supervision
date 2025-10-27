@@ -47,9 +47,9 @@ def get_args():
     )
 
     parser.add_argument(
-        "--max-age",
+        "--lost-track-buffer",
         type=int,
-        help="Maximum frames to keep track without detections (default: 30)",
+        help="Frames to buffer when track is lost (default: 30)",
     )
 
     parser.add_argument(
@@ -118,7 +118,9 @@ def main():
         output_cfg["file_path"] = args.output
 
     # SORT tracker parameters
-    max_age = args.max_age if args.max_age is not None else 30
+    lost_track_buffer = getattr(args, 'lost_track_buffer', None)
+    if lost_track_buffer is None:
+        lost_track_buffer = 30
     min_hits = args.min_hits if args.min_hits is not None else 3
     iou_threshold = args.iou if args.iou is not None else 0.3
 
@@ -129,7 +131,7 @@ def main():
     print(f"Model: {detector_cfg.get('model_path')}")
     print(f"Confidence: {detector_cfg.get('confidence_threshold', 0.4)}")
     print(f"SORT Parameters:")
-    print(f"  - max_age: {max_age}")
+    print(f"  - lost_track_buffer: {lost_track_buffer}")
     print(f"  - min_hits: {min_hits}")
     print(f"  - iou_threshold: {iou_threshold}")
     print("=" * 60)
@@ -163,7 +165,7 @@ def main():
 
     # Create SORT tracker step
     tracker_step = sv.SORTTrackerStep(
-        max_age=max_age,
+        lost_track_buffer=lost_track_buffer,
         min_hits=min_hits,
         iou_threshold=iou_threshold,
     )

@@ -299,7 +299,7 @@ class SORTTrackerStep:
             sv.Pipeline(sv.VideoFileSource("video.mp4"))
             | yolo_step
             | sv.SORTTrackerStep(
-                max_age=30,
+                lost_track_buffer=30,
                 min_hits=3,
                 iou_threshold=0.3
             )
@@ -311,7 +311,7 @@ class SORTTrackerStep:
 
     def __init__(
         self,
-        max_age: int = 30,
+        lost_track_buffer: int = 30,
         min_hits: int = 3,
         iou_threshold: float = 0.3,
         detections_key: str = "detections",
@@ -321,7 +321,7 @@ class SORTTrackerStep:
         Initialize SORT tracking step.
 
         Args:
-            max_age: Maximum number of frames to keep alive a track without detections.
+            lost_track_buffer: Number of frames to buffer when a track is lost.
             min_hits: Minimum number of associated detections before track is confirmed.
             iou_threshold: Minimum IoU for matching detections to tracks.
             detections_key: Key in data dict containing Detections object
@@ -334,7 +334,7 @@ class SORTTrackerStep:
         self.detections_key = detections_key
         self.metrics_key = metrics_key
         self.tracker = SORT(
-            max_age=max_age,
+            lost_track_buffer=lost_track_buffer,
             min_hits=min_hits,
             iou_threshold=iou_threshold,
         )
@@ -418,7 +418,7 @@ class CentroidTrackerStep:
             sv.Pipeline(sv.VideoFileSource("video.mp4"))
             | yolo_step
             | sv.CentroidTrackerStep(
-                max_disappeared=50,
+                lost_track_buffer=50,
                 max_distance=100.0
             )
             | sv.TrackerAnnotatorStep(class_names=yolo_step.model.names)
@@ -429,7 +429,7 @@ class CentroidTrackerStep:
 
     def __init__(
         self,
-        max_disappeared: int = 30,
+        lost_track_buffer: int = 30,
         max_distance: float = 50.0,
         detections_key: str = "detections",
         metrics_key: str = "tracker_metrics",
@@ -438,8 +438,7 @@ class CentroidTrackerStep:
         Initialize centroid tracking step.
 
         Args:
-            max_disappeared: Maximum number of frames a track can disappear
-                before being deregistered.
+            lost_track_buffer: Number of frames to buffer when a track is lost.
             max_distance: Maximum Euclidean distance for associating detections
                 to existing tracks.
             detections_key: Key in data dict containing Detections object
@@ -452,7 +451,7 @@ class CentroidTrackerStep:
         self.detections_key = detections_key
         self.metrics_key = metrics_key
         self.tracker = CentroidTracker(
-            max_disappeared=max_disappeared,
+            lost_track_buffer=lost_track_buffer,
             max_distance=max_distance,
         )
 
