@@ -61,7 +61,7 @@ def get_args():
     parser.add_argument(
         "--iou",
         type=float,
-        help="IoU threshold for matching (default: 0.3)",
+        help="Minimum IoU for matching (default: 0.3)",
     )
 
     parser.add_argument(
@@ -119,8 +119,8 @@ def main():
 
     # SORT tracker parameters
     max_age = args.max_age if args.max_age is not None else 30
-    min_hits = args.min_hits if args.min_hits is not None else 1
-    iou_threshold = args.iou if args.iou is not None else 0.1
+    min_hits = args.min_hits if args.min_hits is not None else 3
+    iou_threshold = args.iou if args.iou is not None else 0.3
 
     print("=" * 60)
     print("SORT Tracker Demo")
@@ -183,9 +183,9 @@ def main():
         pipeline = pipeline | sv.DetectionAnnotatorStep(
             detections_key="all_detections",
             class_names=yolo_step.model.names,
-            box_color=sv.Color.WHITE,
+            box_color=sv.Color.GREY,
             box_thickness=1,
-            label_color=sv.Color.WHITE,
+            label_color=sv.Color.GREY,
             show_class=True,
             show_confidence=True,
             copy_frame=False,

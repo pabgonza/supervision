@@ -20,7 +20,8 @@ class SORT:
     Args:
         max_age: Maximum number of frames to keep alive a track without detections.
         min_hits: Minimum number of associated detections before track is confirmed.
-        iou_threshold: Minimum IoU threshold for matching detections to tracks.
+        iou_threshold: Minimum IoU for matching detections to tracks (0.0 to 1.0).
+            Higher values require more overlap for matching.
     """
 
     def __init__(
@@ -108,9 +109,12 @@ class SORT:
         # Calculate IoU cost matrix
         iou_matrix = matching.iou_distance(track_boxes, detections.xyxy)
 
+        # Convert IoU threshold to distance threshold (distance = 1 - IoU)
+        iou_distance_threshold = 1.0 - self.iou_threshold
+
         # Use Hungarian algorithm for matching
         matches, unmatched_tracks, unmatched_detections = matching.linear_assignment(
-            iou_matrix, self.iou_threshold
+            iou_matrix, iou_distance_threshold
         )
 
         return matches, unmatched_tracks, unmatched_detections
