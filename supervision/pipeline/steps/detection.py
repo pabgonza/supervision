@@ -4,7 +4,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 from threading import Event, Lock, Thread
 from typing import Any
 
@@ -573,7 +573,7 @@ class AsyncDetectionStep(ABC):
             # Send poison pill
             try:
                 self._inference_queue.put(None, timeout=1.0)
-            except:
+            except Full:
                 pass
 
             if self._worker_thread:
@@ -596,7 +596,7 @@ class AsyncDetectionStep(ABC):
             with self._result_lock:
                 self._metrics["frames_queued"] += 1
             return True
-        except:
+        except Full:
             with self._result_lock:
                 self._metrics["queue_full_count"] += 1
             return False
@@ -609,7 +609,7 @@ class AsyncDetectionStep(ABC):
                 self._inference_queue.get_nowait()
                 self._inference_queue.task_done()
                 cleared += 1
-            except:
+            except Empty:
                 break
 
     def _use_cached_result(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -1133,7 +1133,7 @@ class PoolDetectorStep(ABC):
             for _ in range(self.pool_size):
                 try:
                     self._frame_queue.put(None, timeout=1.0)
-                except:
+                except Full:
                     pass
 
             # Wait for workers to finish
@@ -1175,7 +1175,7 @@ class PoolDetectorStep(ABC):
         enqueue_time = time.time()
         try:
             self._frame_queue.put_nowait((sequence_num, frame, enqueue_time))
-        except:
+        except Full:
             # Queue full - drop frame
             with self._metrics_lock:
                 self._metrics["queue_full_count"] += 1

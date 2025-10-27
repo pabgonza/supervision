@@ -272,7 +272,8 @@ def get_video_info_from_source(
         source: Supervision source
 
     Returns:
-        Tuple of (fps, width, height). Returns defaults (30, 1280, 720) if unable to read.
+        Tuple of (fps, width, height). Returns defaults (30, 1280, 720)
+        if unable to read.
     """
     import cv2
 
@@ -315,7 +316,8 @@ def get_video_info_with_fallbacks(
     Args:
         source: Supervision source
         fallback_fps: FPS to use if unable to read or invalid (default: 30)
-        fallback_resolution: (width, height) to use if unable to read (default: 1920x1080)
+        fallback_resolution: (width, height) to use if unable to read
+            (default: 1920x1080)
 
     Returns:
         Tuple of (fps, width, height)
@@ -543,7 +545,8 @@ def create_metrics_overlay_callback(
     Create configurable metrics overlay callback.
 
     Args:
-        position: Position of overlay ("top-left", "top-right", "bottom-left", "bottom-right")
+        position: Position of overlay
+            ("top-left", "top-right", "bottom-left", "bottom-right")
         font_scale: Font scale for text (default: 0.5)
         color: Text color in BGR format (default: green (0, 255, 0))
         bg_opacity: Background opacity 0.0-1.0 (default: 0.6)
@@ -742,7 +745,7 @@ def save_metrics_to_json(metrics_data: list, file_path: str) -> None:
         json.dump(metrics_data, f, indent=2)
 
 
-def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
+def plot_metrics_from_json(json_path: str, output_path: Optional[str] = None) -> str:
     """
     Load metrics from JSON file and create plots.
 
@@ -752,7 +755,8 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
 
     Args:
         json_path: Path to JSON file containing metrics
-        output_path: Optional custom output path for PNG (default: same as JSON with .png extension)
+        output_path: Optional custom output path for PNG
+            (default: same as JSON with .png extension)
 
     Returns:
         Path to the saved plot image
@@ -1131,7 +1135,8 @@ def create_tracker_step_from_config(
         metrics_key: Key to store timing metrics in data dict
 
     Returns:
-        Appropriate tracker step (ByteTrackerStep, SORTTrackerStep, or CentroidTrackerStep)
+        Appropriate tracker step
+            (ByteTrackerStep, SORTTrackerStep, or CentroidTrackerStep)
 
     Raises:
         ValueError: If tracker type is unknown or tracker config is missing
@@ -1149,7 +1154,9 @@ def create_tracker_step_from_config(
         >>> tracker = create_tracker_step_from_config(config)
 
         >>> # Centroid
-        >>> config = {'tracker': {'type': 'centroid', 'centroid': {'max_distance': 50.0}}}
+        >>> config = {
+        ...     'tracker': {'type': 'centroid', 'centroid': {'max_distance': 50.0}}
+        ... }
         >>> tracker = create_tracker_step_from_config(config)
     """
     tracker_config = config.get("tracker", {})
