@@ -19,7 +19,7 @@ video:
   #   - Video files:       /path/to/video.mp4
   #   - Webcam:            0 (or 1, 2, etc.)
   # input: rtsp://192.168.18.169:554/live1s3.sdp
-  input: rtsp://localhost:8554/mi_camara
+  # input: rtsp://localhost:8554/mi_camara
   input: D:/Trabajo/src/CV/ball_counter/assets/Quilicura_V_20240801_132852_720p.mp4
   # input: 0
 
@@ -34,7 +34,9 @@ video:
 # ----------------------------------------------------------------------------
 detector:
   # Path to YOLO model (.pt file for PyTorch, .engine for TensorRT)
-  model_path: yolov8n.pt
+  # model_path: yolov8n.pt
+  model_path: D:/Trabajo/src/CV/ball_counter/models/ball_detector_yolov11n_v4n_rf.pt
+
 
   # Confidence threshold for detections (0.0 - 1.0)
   # Higher values = fewer detections but more confident
@@ -71,22 +73,50 @@ pool:
   queue_size: 120
 
 # ----------------------------------------------------------------------------
-# Object Tracker Configuration (ByteTrack)
+# Object Tracker Configuration
 # ----------------------------------------------------------------------------
+# Choose tracker type and configure its specific parameters
 tracker:
+  # Tracker type: "bytetrack", "sort", or "centroid"
+  # - bytetrack: Advanced tracker with Kalman + score fusion (best for crowded scenes)
+  # - sort: Simple Online Realtime Tracking with Kalman (fast and reliable)
+  # - centroid: Centroid-based tracking with Euclidean distance (fastest, simple scenes)
   type: bytetrack
 
-  # Confidence threshold to activate a new track (0.0 - 1.0)
-  track_activation_threshold: 0.25
+  # ByteTrack parameters (used when type: bytetrack)
+  bytetrack:
+    # Confidence threshold to activate a new track (0.0 - 1.0)
+    track_activation_threshold: 0.25
 
-  # Frames to buffer after losing a track
-  lost_track_buffer: 30
+    # Frames to buffer after losing a track
+    lost_track_buffer: 30
 
-  # Minimum threshold for matching between frames (0.0 - 1.0)
-  minimum_matching_threshold: 0.8
+    # Minimum threshold for matching between frames (0.0 - 1.0)
+    # Higher values improve accuracy but risk fragmentation
+    minimum_matching_threshold: 0.8
 
-  # Consecutive frames required to confirm a track
-  minimum_consecutive_frames: 1
+    # Consecutive frames required to confirm a track
+    minimum_consecutive_frames: 1
+
+  # SORT parameters (used when type: sort)
+  sort:
+    # Maximum frames to keep track without detections
+    max_age: 30
+
+    # Minimum detections required to confirm track
+    min_hits: 3
+
+    # Minimum IoU for matching detections to tracks (0.0 - 1.0)
+    # Higher values require more overlap
+    iou_threshold: 0.3
+
+  # Centroid parameters (used when type: centroid)
+  centroid:
+    # Maximum frames a track can disappear before being deregistered
+    max_disappeared: 30
+
+    # Maximum Euclidean distance in pixels for associating detections to tracks
+    max_distance: 50.0
 
 # ----------------------------------------------------------------------------
 # Counting Lines Configuration

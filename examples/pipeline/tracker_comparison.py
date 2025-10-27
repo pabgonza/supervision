@@ -103,26 +103,29 @@ def get_args():
 
 
 def create_tracker_step(tracker_type, tracker_cfg):
-    """Create tracker step based on type."""
+    """Create tracker step based on type using new config structure."""
     if tracker_type == "bytetrack":
+        params = tracker_cfg.get("bytetrack", {})
         return sv.ByteTrackerStep(
-            track_activation_threshold=tracker_cfg.get("track_activation_threshold", 0.25),
-            lost_track_buffer=tracker_cfg.get("lost_track_buffer", 30),
-            minimum_matching_threshold=tracker_cfg.get("minimum_matching_threshold", 0.8),
-            minimum_consecutive_frames=tracker_cfg.get("minimum_consecutive_frames", 1),
+            track_activation_threshold=params.get("track_activation_threshold", 0.25),
+            lost_track_buffer=params.get("lost_track_buffer", 30),
+            minimum_matching_threshold=params.get("minimum_matching_threshold", 0.8),
+            minimum_consecutive_frames=params.get("minimum_consecutive_frames", 1),
             detections_key="detections",
         )
     elif tracker_type == "sort":
+        params = tracker_cfg.get("sort", {})
         return sv.SORTTrackerStep(
-            max_age=tracker_cfg.get("lost_track_buffer", 30),
-            min_hits=tracker_cfg.get("minimum_consecutive_frames", 3),
-            iou_threshold=tracker_cfg.get("minimum_matching_threshold", 0.3),
+            max_age=params.get("max_age", 30),
+            min_hits=params.get("min_hits", 3),
+            iou_threshold=params.get("iou_threshold", 0.3),
             detections_key="detections",
         )
     elif tracker_type == "centroid":
+        params = tracker_cfg.get("centroid", {})
         return sv.CentroidTrackerStep(
-            max_disappeared=tracker_cfg.get("lost_track_buffer", 30),
-            max_distance=tracker_cfg.get("max_distance", 50.0),
+            max_disappeared=params.get("max_disappeared", 30),
+            max_distance=params.get("max_distance", 50.0),
             detections_key="detections",
         )
     else:

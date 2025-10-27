@@ -217,22 +217,11 @@ def main():
 
     copy_detections_step = sv.CallbackStep(copy_all_detections)
 
-    # Object tracking
-    tracker_step = sv.ByteTrackerStep(
-        track_activation_threshold=tracker_cfg.get("track_activation_threshold", 0.25),
-        lost_track_buffer=tracker_cfg.get("lost_track_buffer", 30),
-        minimum_matching_threshold=tracker_cfg.get("minimum_matching_threshold", 0.8),
-        minimum_consecutive_frames=tracker_cfg.get("minimum_consecutive_frames", 1),
-        detections_key="detections",
+    # Object tracking - automatically selects tracker based on config
+    tracker_step = utils.create_tracker_step_from_config(
+        config,
+        detections_key="detections"
     )
-
-    # tracker_step = sv.SORTTrackerStep(
-    #         max_age=tracker_cfg.get("lost_track_buffer", 30),
-    #         min_hits=tracker_cfg.get("minimum_consecutive_frames", 3),
-    #         iou_threshold=tracker_cfg.get("minimum_matching_threshold", 0.3),
-    #         detections_key="detections",
-    #     )
-
 
     # Line counting
     line_zone_step = sv.LineZoneStep(
@@ -274,9 +263,9 @@ def main():
         pipeline = pipeline | sv.DetectionAnnotatorStep(
             detections_key="all_detections",
             class_names=yolo_step.model.names,
-            box_color=sv.Color.WHITE,
+            box_color=sv.Color.GREY,
             box_thickness=1,
-            label_color=sv.Color.WHITE,
+            label_color=sv.Color.GREY,
             show_class=True,
             show_confidence=True,
             copy_frame=False

@@ -900,3 +900,81 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
     plt.close()
 
     return str(output_path)
+
+
+def create_tracker_step_from_config(
+    config: dict,
+    detections_key: str = "detections",
+    metrics_key: str = "tracker_metrics"
+):
+    """
+    Create tracker step from configuration dict.
+
+    Reads tracker.type from config and creates the appropriate TrackerStep
+    with parameters from the corresponding tracker-specific section.
+
+    Args:
+        config: Configuration dictionary with tracker settings
+        detections_key: Key in data dict containing Detections object
+        metrics_key: Key to store timing metrics in data dict
+
+    Returns:
+        Appropriate tracker step (ByteTrackerStep, SORTTrackerStep, or CentroidTrackerStep)
+
+    Raises:
+        ValueError: If tracker type is unknown or tracker config is missing
+
+    Examples:
+        >>> config = load_yaml_config('config.yaml')
+        >>> tracker_step = create_tracker_step_from_config(config)
+
+        >>> # ByteTrack (default)
+        >>> config = {'tracker': {'type': 'bytetrack', 'bytetrack': {...}}}
+        >>> tracker = create_tracker_step_from_config(config)
+
+        >>> # SORT
+        >>> config = {'tracker': {'type': 'sort', 'sort': {'max_age': 30, ...}}}
+        >>> tracker = create_tracker_step_from_config(config)
+
+        >>> # Centroid
+        >>> config = {'tracker': {'type': 'centroid', 'centroid': {'max_distance': 50.0}}}
+        >>> tracker = create_tracker_step_from_config(config)
+    """
+    tracker_config = config.get("tracker", {})
+    tracker_type = tracker_config.get("type", "bytetrack").lower()
+
+    if tracker_type == "bytetrack":
+        params = tracker_config.get("bytetrack", {})
+        return sv.ByteTrackerStep(
+            track_activation_threshold=params.get("track_activation_threshold", 0.25),
+            lost_track_buffer=params.get("lost_track_buffer", 30),
+            minimum_matching_threshold=params.get("minimum_matching_threshold", 0.8),
+            minimum_consecutive_frames=params.get("minimum_consecutive_frames", 1),
+            detections_key=detections_key,
+            metrics_key=metrics_key,
+        )
+
+    elif tracker_type == "sort":
+        params = tracker_config.get("sort", {})
+        return sv.SORTTrackerStep(
+            max_age=params.get("max_age", 30),
+            min_hits=params.get("min_hits", 3),
+            iou_threshold=params.get("iou_threshold", 0.3),
+            detections_key=detections_key,
+            metrics_key=metrics_key,
+        )
+
+    elif tracker_type == "centroid":
+        params = tracker_config.get("centroid", {})
+        return sv.CentroidTrackerStep(
+            max_disappeared=params.get("max_disappeared", 30),
+            max_distance=params.get("max_distance", 50.0),
+            detections_key=detections_key,
+            metrics_key=metrics_key,
+        )
+
+    else:
+        raise ValueError(
+            f"Unknown tracker type: {tracker_type}. "
+            "Supported types: 'bytetrack', 'sort', 'centroid'"
+        )
