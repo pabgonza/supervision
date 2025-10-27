@@ -450,6 +450,56 @@ def main():
                     )
                     frame_metrics["queue_size_max"] = pool_metrics.get("queue_max", 0)
 
+                # Add objects that crossed the line
+                crossed_objects = []
+                if line_zone and detections:
+                    # Objects that crossed IN
+                    for tracker_id in line_zone.last_crossed_in_ids:
+                        idx = None
+                        if detections.tracker_id is not None:
+                            matches = detections.tracker_id == tracker_id
+                            if matches.any():
+                                idx = matches.argmax()
+
+                        if idx is not None:
+                            xyxy = detections.xyxy[idx]
+                            x, y, x2, y2 = xyxy
+                            w, h = x2 - x, y2 - y
+                            crossed_objects.append(
+                                {
+                                    "tracker_id": int(tracker_id),
+                                    "direction": "in",
+                                    "x": float(x),
+                                    "y": float(y),
+                                    "w": float(w),
+                                    "h": float(h),
+                                }
+                            )
+
+                    # Objects that crossed OUT
+                    for tracker_id in line_zone.last_crossed_out_ids:
+                        idx = None
+                        if detections.tracker_id is not None:
+                            matches = detections.tracker_id == tracker_id
+                            if matches.any():
+                                idx = matches.argmax()
+
+                        if idx is not None:
+                            xyxy = detections.xyxy[idx]
+                            x, y, x2, y2 = xyxy
+                            w, h = x2 - x, y2 - y
+                            crossed_objects.append(
+                                {
+                                    "tracker_id": int(tracker_id),
+                                    "direction": "out",
+                                    "x": float(x),
+                                    "y": float(y),
+                                    "w": float(w),
+                                    "h": float(h),
+                                }
+                            )
+
+                frame_metrics["crossed_objects"] = crossed_objects
                 metrics_data.append(frame_metrics)
 
             # Print stats every stats_n_frames frames

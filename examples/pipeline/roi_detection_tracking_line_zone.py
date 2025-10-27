@@ -67,25 +67,25 @@ def get_args():
     parser.add_argument(
         "--display",
         action="store_true",
-        help="Enable display window with input frame, roi and detections"
+        help="Enable display window with input frame, roi and detections",
     )
 
     parser.add_argument(
         "--show-metrics",
         action="store_true",
-        help="Show detailed metrics overlay on frame"
+        help="Show detailed metrics overlay on frame",
     )
 
     parser.add_argument(
         "--output",
         type=str,
-        help="Output video file path (overrides config and enables output)"
+        help="Output video file path (overrides config and enables output)",
     )
 
     parser.add_argument(
         "--save-metrics",
         type=str,
-        help="Save frame metrics to JSON file (e.g., metrics.json)"
+        help="Save frame metrics to JSON file (e.g., metrics.json)",
     )
 
     return parser.parse_args()
@@ -118,7 +118,6 @@ def main():
     if args.output:
         output_cfg["enabled"] = True
         output_cfg["file_path"] = args.output
-
 
     # Check for ROIs in config
     rois = config.get("rois", [])
@@ -176,7 +175,7 @@ def main():
     fps, width, height = utils.get_video_info_with_fallbacks(
         source,
         fallback_fps=video_cfg.get("fallback_fps", 30),
-        fallback_resolution=tuple(video_cfg.get("fallback_resolution", [1920, 1080]))
+        fallback_resolution=tuple(video_cfg.get("fallback_resolution", [1920, 1080])),
     )
     print(f"Video info: {width}x{height} @ {fps} fps\n")
 
@@ -219,8 +218,7 @@ def main():
 
     # Object tracking - automatically selects tracker based on config
     tracker_step = utils.create_tracker_step_from_config(
-        config,
-        detections_key="detections"
+        config, detections_key="detections"
     )
 
     # Line counting
@@ -247,7 +245,6 @@ def main():
 
     # Add annotations if display or output is enabled
     if display_cfg.get("enabled", False) or output_cfg.get("enabled", False):
-
         # ROI visualization
         pipeline = pipeline | sv.ROIVisualizationStep(
             x=roi_x,
@@ -256,7 +253,7 @@ def main():
             height=roi_h,
             color=(255, 255, 0),
             thickness=2,
-            copy_frame=False
+            copy_frame=False,
         )
 
         # Draw all detections in white (before tracking filtered them)
@@ -268,7 +265,7 @@ def main():
             label_color=sv.Color.GREY,
             show_class=True,
             show_confidence=True,
-            copy_frame=False
+            copy_frame=False,
         )
 
         # Tracking annotations (boxes, labels with tracker IDs, and traces)
@@ -281,7 +278,7 @@ def main():
             trace_length=30,
             trace_thickness=2,
             box_thickness=2,
-            copy_frame=False
+            copy_frame=False,
         )
 
         # Line zone visualization
@@ -291,7 +288,7 @@ def main():
             thickness=line_vis_cfg.get("thickness", 4),
             custom_in_text=line_vis_cfg.get("in_text"),
             custom_out_text=line_vis_cfg.get("out_text"),
-            copy_frame=False
+            copy_frame=False,
         )
 
         # Add metrics overlay if requested
@@ -376,8 +373,60 @@ def main():
                 # Add tracking time if available
                 tracker_metrics = data.get("tracker_metrics", {})
                 if tracker_metrics and "processing_time_ms" in tracker_metrics:
-                    frame_metrics["tracking_time_ms"] = tracker_metrics["processing_time_ms"]
+                    frame_metrics["tracking_time_ms"] = tracker_metrics[
+                        "processing_time_ms"
+                    ]
 
+                # Add objects that crossed the line
+                crossed_objects = []
+                if line_zone and detections:
+                    # Objects that crossed IN
+                    for tracker_id in line_zone.last_crossed_in_ids:
+                        idx = None
+                        if detections.tracker_id is not None:
+                            matches = detections.tracker_id == tracker_id
+                            if matches.any():
+                                idx = matches.argmax()
+
+                        if idx is not None:
+                            xyxy = detections.xyxy[idx]
+                            x, y, x2, y2 = xyxy
+                            w, h = x2 - x, y2 - y
+                            crossed_objects.append(
+                                {
+                                    "tracker_id": int(tracker_id),
+                                    "direction": "in",
+                                    "x": float(x),
+                                    "y": float(y),
+                                    "w": float(w),
+                                    "h": float(h),
+                                }
+                            )
+
+                    # Objects that crossed OUT
+                    for tracker_id in line_zone.last_crossed_out_ids:
+                        idx = None
+                        if detections.tracker_id is not None:
+                            matches = detections.tracker_id == tracker_id
+                            if matches.any():
+                                idx = matches.argmax()
+
+                        if idx is not None:
+                            xyxy = detections.xyxy[idx]
+                            x, y, x2, y2 = xyxy
+                            w, h = x2 - x, y2 - y
+                            crossed_objects.append(
+                                {
+                                    "tracker_id": int(tracker_id),
+                                    "direction": "out",
+                                    "x": float(x),
+                                    "y": float(y),
+                                    "w": float(w),
+                                    "h": float(h),
+                                }
+                            )
+
+                frame_metrics["crossed_objects"] = crossed_objects
                 metrics_data.append(frame_metrics)
 
             # Print stats every stats_n_frames frames
@@ -407,6 +456,7 @@ def main():
         print(f"Metrics plot saved to: {plot_path}")
 
     print("\nDone!")
+
 
 if __name__ == "__main__":
     main()

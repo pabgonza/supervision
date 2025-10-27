@@ -172,6 +172,11 @@ From metrics overlay or JSON export:
 - `tracked_objects`: Number of active tracked objects
 - `line_in_count`: Objects crossed line inward
 - `line_out_count`: Objects crossed line outward
+- `crossed_objects`: List of objects that crossed the line in this frame
+  - `tracker_id`: Unique tracker ID of the object
+  - `direction`: "in" or "out" depending on crossing direction
+  - `x`, `y`: Top-left corner coordinates of bounding box
+  - `w`, `h`: Width and height of bounding box
 
 ### Pool Metrics (per-frame snapshot)
 
@@ -188,6 +193,38 @@ From metrics overlay or JSON export:
 
 - `inference_time_ms`: Detection inference time
 - `tracking_time_ms`: Tracking processing time
+
+### Example Metrics Output
+
+```json
+{
+  "frame": 150,
+  "fps": 85.2,
+  "detections": 4,
+  "tracked_objects": 3,
+  "line_in_count": 12,
+  "line_out_count": 7,
+  "inference_time_ms": 8.5,
+  "tracking_time_ms": 1.2,
+  "workers_active": 4,
+  "frames_dropped_total": 0,
+  "frames_reordered_total": 15,
+  "avg_queue_time_ms": 2.3,
+  "avg_reorder_delay_ms": 0.5,
+  "queue_size_current": 3,
+  "queue_size_max": 10,
+  "crossed_objects": [
+    {
+      "tracker_id": 42,
+      "direction": "in",
+      "x": 450.5,
+      "y": 230.8,
+      "w": 85.2,
+      "h": 120.4
+    }
+  ]
+}
+```
 
 ## Performance Expectations
 
