@@ -176,6 +176,9 @@ display:
     show_roi_info: true
     show_inference_time: true
     show_tracking_time: true
+    # Show pool detector metrics (workers, queue, dropped frames)
+    # Only applicable when using PoolYOLODetectionStep
+    # Set to true to monitor pool performance in real-time
     show_pool_metrics: false
 
 # ----------------------------------------------------------------------------

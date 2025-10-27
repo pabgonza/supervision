@@ -112,7 +112,7 @@ def create_source(
     source_str: str,
     camera_id: int = 0,
     width: Optional[int] = None,
-    height: Optional[int] = None
+    height: Optional[int] = None,
 ) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
     """
     Create video source automatically detecting the type.
@@ -162,7 +162,9 @@ def create_source(
         return sv.StreamSource(source_str)
 
 
-def create_source_from_args(args: argparse.Namespace) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
+def create_source_from_args(
+    args: argparse.Namespace,
+) -> Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]:
     """
     Create supervision source from parsed arguments.
 
@@ -244,13 +246,15 @@ def create_sink_from_args(
     # Both display and save
     elif output:
         sinks = [sv.DisplaySink(window_name)]
-        sinks.append(sv.VideoFileSink(
-            output_path=output,
-            fps=fps,
-            width=width,
-            height=height,
-            codec=codec,
-        ))
+        sinks.append(
+            sv.VideoFileSink(
+                output_path=output,
+                fps=fps,
+                width=width,
+                height=height,
+                codec=codec,
+            )
+        )
         return sv.MultiSink(sinks)
 
     # Only display
@@ -258,7 +262,9 @@ def create_sink_from_args(
         return sv.DisplaySink(window_name)
 
 
-def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource]) -> tuple:
+def get_video_info_from_source(
+    source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource],
+) -> tuple:
     """
     Get video information (fps, width, height) from a source without consuming it.
 
@@ -298,7 +304,7 @@ def get_video_info_from_source(source: Union[sv.WebcamSource, sv.VideoFileSource
 def get_video_info_with_fallbacks(
     source: Union[sv.WebcamSource, sv.VideoFileSource, sv.StreamSource],
     fallback_fps: int = 30,
-    fallback_resolution: tuple = (1920, 1080)
+    fallback_resolution: tuple = (1920, 1080),
 ) -> tuple:
     """
     Get video information with configurable fallback values.
@@ -351,7 +357,12 @@ def print_source_info(args: argparse.Namespace) -> None:
     print(f"Source: {args.source}")
 
     if args.source == "webcam":
-        if hasattr(args, "width") and hasattr(args, "height") and args.width and args.height:
+        if (
+            hasattr(args, "width")
+            and hasattr(args, "height")
+            and args.width
+            and args.height
+        ):
             print(f"Camera: {args.camera} ({args.width}x{args.height})")
         else:
             print(f"Camera: {args.camera} (default resolution)")
@@ -500,6 +511,7 @@ def create_line_extract_callback():
         ...                          custom_metrics=["line_in", "line_out"])
         ... )
     """
+
     def extract_line_counts(data):
         """Extract line crossing counts to data dict."""
         line_zone = data.get("line_zone")
@@ -640,13 +652,15 @@ def create_metrics_overlay_callback(
 
         # Pool detector metrics
         if show_pool_metrics:
-            pool_detector = data.get("pool_detector")
-            if pool_detector is not None:
-                metrics = pool_detector.get_metrics()
-                queue_current, queue_max = pool_detector.get_queue_size()
-                lines.append(f"Workers: {metrics['workers_active']}")
-                lines.append(f"Queue: {queue_current}/{queue_max}")
-                lines.append(f"Dropped: {metrics['frames_dropped']}")
+            pool_metrics = data.get("pool_metrics")
+            if pool_metrics is not None:
+                lines.append(f"Workers: {pool_metrics['workers_active']}")
+                # Queue size is now part of pool_metrics dict
+                queue_current = pool_metrics.get("queue_current")
+                queue_max = pool_metrics.get("queue_max")
+                if queue_current is not None and queue_max is not None:
+                    lines.append(f"Queue: {queue_current}/{queue_max}")
+                lines.append(f"Dropped: {pool_metrics['frames_dropped']}")
 
         # Calculate text dimensions
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -772,22 +786,34 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
     inference_times = [m.get("inference_time_ms", None) for m in metrics_data]
     tracking_times = [m.get("tracking_time_ms", None) for m in metrics_data]
 
+    # Extract pool metrics
+    workers_active = [m.get("workers_active", None) for m in metrics_data]
+    queue_sizes = [m.get("queue_size_current", None) for m in metrics_data]
+    frames_dropped = [m.get("frames_dropped_total", None) for m in metrics_data]
+
     # Stabilization threshold
     stabilization_frame = 200
 
     # Get stable data (after stabilization period)
     stable_indices = [i for i, f in enumerate(frames) if f > stabilization_frame]
-    stable_fps = [fps_values[i] for i in stable_indices] if stable_indices else fps_values
-    stable_detections = [detections[i] for i in stable_indices] if stable_indices else detections
+    stable_fps = (
+        [fps_values[i] for i in stable_indices] if stable_indices else fps_values
+    )
+    stable_detections = (
+        [detections[i] for i in stable_indices] if stable_indices else detections
+    )
 
     # Determine number of subplots
     has_inference = any(t is not None for t in inference_times)
     has_tracking = any(t is not None for t in tracking_times)
+    has_pool_metrics = any(w is not None for w in workers_active)
     num_plots = 2  # FPS + Detections
     if has_inference:
         num_plots += 1
     if has_tracking:
         num_plots += 1
+    if has_pool_metrics:
+        num_plots += 2  # Workers/Queue + Dropped frames
 
     # Create figure with shared x-axis
     fig, axes = plt.subplots(num_plots, 1, figsize=(12, 4 * num_plots), sharex=True)
@@ -804,12 +830,32 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
         avg_fps = np.mean(stable_fps)
         min_fps = np.min(stable_fps)
         max_fps = np.max(stable_fps)
-        axes[0].axhline(y=avg_fps, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_fps:.1f}")
-        axes[0].axhline(y=min_fps, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_fps:.1f}")
-        axes[0].axhline(y=max_fps, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_fps:.1f}")
+        axes[0].axhline(
+            y=avg_fps, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_fps:.1f}"
+        )
+        axes[0].axhline(
+            y=min_fps,
+            color="orange",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Min: {min_fps:.1f}",
+        )
+        axes[0].axhline(
+            y=max_fps,
+            color="green",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Max: {max_fps:.1f}",
+        )
 
     if len(frames) > stabilization_frame:
-        axes[0].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+        axes[0].axvline(
+            x=stabilization_frame,
+            color="gray",
+            linestyle=":",
+            alpha=0.7,
+            label=f"Stabilization ({stabilization_frame})",
+        )
 
     axes[0].legend()
 
@@ -823,68 +869,234 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
         avg_detections = np.mean(stable_detections)
         min_detections = np.min(stable_detections)
         max_detections = np.max(stable_detections)
-        axes[1].axhline(y=avg_detections, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_detections:.1f}")
-        axes[1].axhline(y=min_detections, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_detections}")
-        axes[1].axhline(y=max_detections, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_detections}")
+        axes[1].axhline(
+            y=avg_detections,
+            color="r",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Avg: {avg_detections:.1f}",
+        )
+        axes[1].axhline(
+            y=min_detections,
+            color="orange",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Min: {min_detections}",
+        )
+        axes[1].axhline(
+            y=max_detections,
+            color="green",
+            linestyle="--",
+            alpha=0.5,
+            label=f"Max: {max_detections}",
+        )
 
     if len(frames) > stabilization_frame:
-        axes[1].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+        axes[1].axvline(
+            x=stabilization_frame,
+            color="gray",
+            linestyle=":",
+            alpha=0.7,
+            label=f"Stabilization ({stabilization_frame})",
+        )
 
     axes[1].legend()
 
     # Plot Inference Time if available
     current_plot_idx = 2
     if has_inference:
-        valid_inference = [(f, t) for f, t in zip(frames, inference_times) if t is not None]
+        valid_inference = [
+            (f, t) for f, t in zip(frames, inference_times) if t is not None
+        ]
         if valid_inference:
             inf_frames, inf_times = zip(*valid_inference)
-            axes[current_plot_idx].plot(inf_frames, inf_times, linewidth=1.5, color="#EE5A6F")
+            axes[current_plot_idx].plot(
+                inf_frames, inf_times, linewidth=1.5, color="#EE5A6F"
+            )
             axes[current_plot_idx].set_ylabel("Inference Time (ms)")
             axes[current_plot_idx].set_title("Inference Time Per Frame")
             axes[current_plot_idx].grid(True, alpha=0.3)
 
-            stable_inference_indices = [i for i, f in enumerate(inf_frames) if f > stabilization_frame]
-            stable_inference = [inf_times[i] for i in stable_inference_indices] if stable_inference_indices else inf_times
+            stable_inference_indices = [
+                i for i, f in enumerate(inf_frames) if f > stabilization_frame
+            ]
+            stable_inference = (
+                [inf_times[i] for i in stable_inference_indices]
+                if stable_inference_indices
+                else inf_times
+            )
 
             if stable_inference:
                 avg_inference = np.mean(stable_inference)
                 min_inference = np.min(stable_inference)
                 max_inference = np.max(stable_inference)
-                axes[current_plot_idx].axhline(y=avg_inference, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_inference:.1f}ms")
-                axes[current_plot_idx].axhline(y=min_inference, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_inference:.1f}ms")
-                axes[current_plot_idx].axhline(y=max_inference, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_inference:.1f}ms")
+                axes[current_plot_idx].axhline(
+                    y=avg_inference,
+                    color="r",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Avg: {avg_inference:.1f}ms",
+                )
+                axes[current_plot_idx].axhline(
+                    y=min_inference,
+                    color="orange",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Min: {min_inference:.1f}ms",
+                )
+                axes[current_plot_idx].axhline(
+                    y=max_inference,
+                    color="green",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Max: {max_inference:.1f}ms",
+                )
 
             if len(inf_frames) > stabilization_frame:
-                axes[current_plot_idx].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+                axes[current_plot_idx].axvline(
+                    x=stabilization_frame,
+                    color="gray",
+                    linestyle=":",
+                    alpha=0.7,
+                    label=f"Stabilization ({stabilization_frame})",
+                )
 
             axes[current_plot_idx].legend()
         current_plot_idx += 1
 
     # Plot Tracking Time if available
     if has_tracking:
-        valid_tracking = [(f, t) for f, t in zip(frames, tracking_times) if t is not None]
+        valid_tracking = [
+            (f, t) for f, t in zip(frames, tracking_times) if t is not None
+        ]
         if valid_tracking:
             track_frames, track_times = zip(*valid_tracking)
-            axes[current_plot_idx].plot(track_frames, track_times, linewidth=1.5, color="#A55EEA")
+            axes[current_plot_idx].plot(
+                track_frames, track_times, linewidth=1.5, color="#A55EEA"
+            )
             axes[current_plot_idx].set_ylabel("Tracking Time (ms)")
             axes[current_plot_idx].set_title("Tracking Time Per Frame")
             axes[current_plot_idx].grid(True, alpha=0.3)
 
-            stable_tracking_indices = [i for i, f in enumerate(track_frames) if f > stabilization_frame]
-            stable_tracking = [track_times[i] for i in stable_tracking_indices] if stable_tracking_indices else track_times
+            stable_tracking_indices = [
+                i for i, f in enumerate(track_frames) if f > stabilization_frame
+            ]
+            stable_tracking = (
+                [track_times[i] for i in stable_tracking_indices]
+                if stable_tracking_indices
+                else track_times
+            )
 
             if stable_tracking:
                 avg_tracking = np.mean(stable_tracking)
                 min_tracking = np.min(stable_tracking)
                 max_tracking = np.max(stable_tracking)
-                axes[current_plot_idx].axhline(y=avg_tracking, color="r", linestyle="--", alpha=0.5, label=f"Avg: {avg_tracking:.1f}ms")
-                axes[current_plot_idx].axhline(y=min_tracking, color="orange", linestyle="--", alpha=0.5, label=f"Min: {min_tracking:.1f}ms")
-                axes[current_plot_idx].axhline(y=max_tracking, color="green", linestyle="--", alpha=0.5, label=f"Max: {max_tracking:.1f}ms")
+                axes[current_plot_idx].axhline(
+                    y=avg_tracking,
+                    color="r",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Avg: {avg_tracking:.1f}ms",
+                )
+                axes[current_plot_idx].axhline(
+                    y=min_tracking,
+                    color="orange",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Min: {min_tracking:.1f}ms",
+                )
+                axes[current_plot_idx].axhline(
+                    y=max_tracking,
+                    color="green",
+                    linestyle="--",
+                    alpha=0.5,
+                    label=f"Max: {max_tracking:.1f}ms",
+                )
 
             if len(track_frames) > stabilization_frame:
-                axes[current_plot_idx].axvline(x=stabilization_frame, color="gray", linestyle=":", alpha=0.7, label=f"Stabilization ({stabilization_frame})")
+                axes[current_plot_idx].axvline(
+                    x=stabilization_frame,
+                    color="gray",
+                    linestyle=":",
+                    alpha=0.7,
+                    label=f"Stabilization ({stabilization_frame})",
+                )
 
             axes[current_plot_idx].legend()
+
+    # Plot pool metrics
+    if has_pool_metrics:
+        current_plot_idx = 2
+        if has_inference:
+            current_plot_idx += 1
+        if has_tracking:
+            current_plot_idx += 1
+
+        # Plot 1: Workers Active and Queue Size
+        valid_workers = [
+            (f, w) for f, w in zip(frames, workers_active) if w is not None
+        ]
+        valid_queue = [(f, q) for f, q in zip(frames, queue_sizes) if q is not None]
+
+        if valid_workers:
+            worker_frames, worker_counts = zip(*valid_workers)
+            axes[current_plot_idx].plot(
+                worker_frames,
+                worker_counts,
+                linewidth=1.5,
+                color="#FFA502",
+                label="Workers Active",
+            )
+
+        if valid_queue:
+            queue_frames, queue_counts = zip(*valid_queue)
+            ax2 = axes[current_plot_idx].twinx()
+            ax2.plot(
+                queue_frames,
+                queue_counts,
+                linewidth=1.5,
+                color="#2ED573",
+                label="Queue Size",
+                linestyle="--",
+            )
+            ax2.set_ylabel("Queue Size (frames)", color="#2ED573")
+            ax2.tick_params(axis="y", labelcolor="#2ED573")
+
+        axes[current_plot_idx].set_ylabel("Workers Active", color="#FFA502")
+        axes[current_plot_idx].set_title("Pool Worker and Queue Status")
+        axes[current_plot_idx].grid(True, alpha=0.3)
+        axes[current_plot_idx].tick_params(axis="y", labelcolor="#FFA502")
+        axes[current_plot_idx].legend(loc="upper left")
+        if valid_queue:
+            ax2.legend(loc="upper right")
+
+        current_plot_idx += 1
+
+        # Plot 2: Dropped Frames (cumulative)
+        valid_dropped = [
+            (f, d) for f, d in zip(frames, frames_dropped) if d is not None
+        ]
+        if valid_dropped:
+            dropped_frames_list, dropped_counts = zip(*valid_dropped)
+            axes[current_plot_idx].plot(
+                dropped_frames_list, dropped_counts, linewidth=1.5, color="#FF6348"
+            )
+            axes[current_plot_idx].set_ylabel("Frames Dropped (cumulative)")
+            axes[current_plot_idx].set_title("Pool Frame Drops Over Time")
+            axes[current_plot_idx].grid(True, alpha=0.3)
+
+            # Add total dropped count as annotation
+            if dropped_counts:
+                total_dropped = dropped_counts[-1]
+                axes[current_plot_idx].text(
+                    0.98,
+                    0.98,
+                    f"Total: {total_dropped}",
+                    transform=axes[current_plot_idx].transAxes,
+                    ha="right",
+                    va="top",
+                    bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+                )
 
     # Add x-label to the last subplot
     axes[-1].set_xlabel("Frame")
@@ -905,7 +1117,7 @@ def plot_metrics_from_json(json_path: str, output_path: str = None) -> str:
 def create_tracker_step_from_config(
     config: dict,
     detections_key: str = "detections",
-    metrics_key: str = "tracker_metrics"
+    metrics_key: str = "tracker_metrics",
 ):
     """
     Create tracker step from configuration dict.

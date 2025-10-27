@@ -156,7 +156,8 @@ class YOLODetectionStep(DetectionStep):
             verbose: Whether to print verbose output
             input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store detections in data dict (default: 'detections')
-            metrics_key: Key to store timing metrics in data dict (default: 'yolo_metrics')
+            metrics_key: Key to store timing metrics in data dict
+                (default: 'yolo_metrics')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
@@ -455,7 +456,8 @@ class AsyncDetectionStep(ABC):
 
         Args:
             strategy: Strategy for handling timing mismatch between detector and source
-            max_queue_size: Maximum frames to queue for processing (lower = less latency)
+            max_queue_size: Maximum frames to queue for processing
+                (lower = less latency)
             inference_timeout: Maximum time to wait for inference results (seconds)
             input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store detections in data dict (default: 'detections')
@@ -936,6 +938,7 @@ class PoolDetectorStep(ABC):
         reorder_timeout: float = 1.0,
         input_key: str = "frame",
         output_key: str = "detections",
+        metrics_key: str = "pool_metrics",
     ):
         """
         Initialize pool detector step.
@@ -948,12 +951,15 @@ class PoolDetectorStep(ABC):
                 is not available within this timeout, empty detections are returned.
             input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store detections in data dict (default: 'detections')
+            metrics_key: Key to store pool metrics in data dict
+                (default: 'pool_metrics')
         """
         self.pool_size = pool_size
         self.max_queue_size = max_queue_size
         self.reorder_timeout = reorder_timeout
         self.input_key = input_key
         self.output_key = output_key
+        self.metrics_key = metrics_key
 
         # Threading components
         self._frame_queue: Queue = Queue(maxsize=max_queue_size)
@@ -1176,6 +1182,8 @@ class PoolDetectorStep(ABC):
                 self._metrics["frames_dropped"] += 1
             # Return data with empty detections
             data[self.output_key] = Detections.empty()
+            # Auto-inject metrics into data dict
+            data[self.metrics_key] = self.get_metrics()
             return data
 
         # Get next ordered result
@@ -1225,6 +1233,9 @@ class PoolDetectorStep(ABC):
             # Timeout - return empty detections
             data[self.output_key] = Detections.empty()
 
+        # Auto-inject metrics into data dict
+        data[self.metrics_key] = self.get_metrics()
+
         return data
 
     def filter(self, data: dict[str, Any]) -> bool:
@@ -1245,9 +1256,16 @@ class PoolDetectorStep(ABC):
                 - avg_reorder_delay_ms: Average time spent in reorder buffer
                 - queue_full_count: Times queue was full
                 - workers_active: Number of active workers
+                - queue_current: Current number of frames in queue
+                - queue_max: Maximum queue capacity
         """
         with self._metrics_lock:
-            return self._metrics.copy()
+            metrics = self._metrics.copy()
+            # Include queue size in metrics dict
+            queue_current, queue_max = self.get_queue_size()
+            metrics["queue_current"] = queue_current
+            metrics["queue_max"] = queue_max
+            return metrics
 
     def get_queue_size(self) -> tuple[int, int]:
         """
@@ -1337,6 +1355,7 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         warmup: bool = True,
         input_key: str = "frame",
         output_key: str = "detections",
+        metrics_key: str = "pool_metrics",
     ):
         """
         Initialize pool YOLO detection step.
@@ -1353,6 +1372,8 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             warmup: Whether to run warmup inference on each model
             input_key: Key in data dict containing input frame (default: 'frame')
             output_key: Key to store detections in data dict (default: 'detections')
+            metrics_key: Key to store pool metrics in data dict
+                (default: 'pool_metrics')
 
         Note:
             Ultralytics automatically detects and uses GPU if CUDA is available.
@@ -1372,6 +1393,7 @@ class PoolYOLODetectionStep(PoolDetectorStep):
             reorder_timeout=reorder_timeout,
             input_key=input_key,
             output_key=output_key,
+            metrics_key=metrics_key,
         )
 
         # YOLO parameters
