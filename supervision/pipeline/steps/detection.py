@@ -179,7 +179,7 @@ class YOLODetectionStep(DetectionStep):
         self.metrics_key = metrics_key
 
         # Load model (device auto-detected by ultralytics)
-        self.model = YOLO(model_path)
+        self.model = YOLO(model_path, task='detect')
 
     def _run_inference(self, frame: np.ndarray) -> tuple[Detections, dict]:
         """
@@ -1405,7 +1405,7 @@ class PoolYOLODetectionStep(PoolDetectorStep):
         # Create one model per worker (device auto-detected by ultralytics)
         self._models: list = []
         for i in range(pool_size):
-            model = YOLO(model_path)
+            model = YOLO(model_path, task='detect')
             self._models.append(model)
 
             # Warmup model
