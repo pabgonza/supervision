@@ -880,3 +880,1011 @@ class StreamCapture:
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Context manager exit."""
         self.stop()
+
+
+class OakRgbCapture:
+    """
+    Threaded capture class for Luxonis OAK RGB cameras using DepthAI API v3.
+
+    This class captures RGB frames from OAK cameras (OAK-1, or the RGB sensor
+    on OAK-D/OAK-D Lite/OAK-D Pro) in a separate thread using a queue buffer.
+    Supports auto-detection of devices and manual camera controls.
+
+    Attributes:
+        device_mxid: Device MxId (None for auto-detection)
+        queue: Thread-safe queue containing captured frames
+        stopped: Flag indicating if capture should stop
+        device_info: Information about the connected device
+
+    Examples:
+        ```python
+        import supervision as sv
+        import cv2
+
+        # Basic usage with auto-detection
+        capture = sv.OakRgbCapture().start()
+        while capture.running():
+            frame = capture.read()
+            cv2.imshow("OAK RGB", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        capture.stop()
+        cv2.destroyAllWindows()
+
+        # With custom resolution and FPS
+        capture = sv.OakRgbCapture(
+            width=1920,
+            height=1080,
+            fps=30
+        ).start()
+
+        # With specific device
+        capture = sv.OakRgbCapture(
+            device_mxid="14442C10D13EAFD000"
+        ).start()
+
+        # With manual controls
+        capture = sv.OakRgbCapture(
+            manual_exposure=10000,  # 10ms
+            manual_iso=400
+        ).start()
+        ```
+    """
+
+    def __init__(
+        self,
+        device_mxid: str | None = None,
+        width: int = 1920,
+        height: int = 1080,
+        fps: int = 30,
+        color_order: str = "BGR",
+        interleaved: bool = True,
+        manual_exposure: int | None = None,
+        manual_iso: int | None = None,
+        manual_focus: int | None = None,
+        manual_white_balance: int | None = None,
+        transform: Callable[[np.ndarray], np.ndarray] | None = None,
+        queue_size: int = 128,
+        name: str = "OakRgbCapture",
+    ):
+        """
+        Initialize the OakRgbCapture.
+
+        Args:
+            device_mxid: Device MxId for specific device (None for auto-detection)
+            width: Frame width in pixels (max 3840 for 4K)
+            height: Frame height in pixels (max 2160 for 4K)
+            fps: Frames per second (e.g., 30, 60)
+            color_order: Color order "RGB" or "BGR" (default: "BGR" for OpenCV)
+            interleaved: True for RGBRGBRGB..., False for RRR...GGG...BBB...
+            manual_exposure: Manual exposure time in microseconds (1-33000,
+                None for auto)
+            manual_iso: Manual ISO sensitivity (100-1600, None for auto)
+            manual_focus: Manual focus value (0-255, None for auto)
+            manual_white_balance: Manual white balance in Kelvin (1000-12000,
+                None for auto)
+            transform: Optional function to transform each frame before queuing
+            queue_size: Maximum number of frames to buffer in queue
+            name: Name for the capture instance
+        """
+        try:
+            import depthai as dai
+        except ImportError:
+            raise ImportError(
+                "depthai is required for OAK camera support. "
+                "Install it with: pip install supervision[oak]"
+            )
+
+        self.dai = dai
+        self.device_mxid = device_mxid
+        self.width = width
+        self.height = height
+        self.fps = fps
+        self.color_order = color_order
+        self.interleaved = interleaved
+        self.manual_exposure = manual_exposure
+        self.manual_iso = manual_iso
+        self.manual_focus = manual_focus
+        self.manual_white_balance = manual_white_balance
+        self.transform = transform
+        self.name = name
+        self.queue: Queue = Queue(maxsize=queue_size)
+        self.stopped = False
+        self.device = None
+        self.device_info = None
+
+        self._initialize_device()
+
+        self.thread = Thread(target=self.update, args=(), name=name)
+        self.thread.daemon = True
+
+    def _initialize_device(self) -> None:
+        """Initialize DepthAI device and pipeline."""
+        devices = self.dai.Device.getAllAvailableDevices()
+        if not devices:
+            raise OSError("No OAK devices found")
+
+        if self.device_mxid:
+            device_info = None
+            for dev in devices:
+                dev_id = dev.getMxId() if hasattr(dev, "getMxId") else dev.deviceId
+                if dev_id == self.device_mxid:
+                    device_info = dev
+                    break
+            if not device_info:
+                raise OSError(f"Device with MxId {self.device_mxid} not found")
+        else:
+            device_info = devices[0]
+
+        dev_id = (
+            device_info.getMxId()
+            if hasattr(device_info, "getMxId")
+            else device_info.deviceId
+        )
+        self.device_info = {
+            "mxid": dev_id,
+            "state": str(device_info.state),
+            "protocol": str(device_info.protocol),
+        }
+
+        pipeline = self.dai.Pipeline()
+
+        cam = pipeline.create(self.dai.node.ColorCamera)
+        cam.setPreviewSize(self.width, self.height)
+        cam.setFps(self.fps)
+
+        if self.color_order == "BGR":
+            cam.setColorOrder(self.dai.ColorCameraProperties.ColorOrder.BGR)
+        else:
+            cam.setColorOrder(self.dai.ColorCameraProperties.ColorOrder.RGB)
+
+        cam.setInterleaved(self.interleaved)
+
+        xout = pipeline.create(self.dai.node.XLinkOut)
+        xout.setStreamName("rgb")
+        cam.preview.link(xout.input)
+
+        if any(
+            [
+                self.manual_exposure is not None,
+                self.manual_iso is not None,
+                self.manual_focus is not None,
+                self.manual_white_balance is not None,
+            ]
+        ):
+            control_in = pipeline.create(self.dai.node.XLinkIn)
+            control_in.setStreamName("control")
+            control_in.out.link(cam.inputControl)
+
+        self.device = self.dai.Device(pipeline, device_info)
+        self.output_queue = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
+
+        if any(
+            [
+                self.manual_exposure is not None,
+                self.manual_iso is not None,
+                self.manual_focus is not None,
+                self.manual_white_balance is not None,
+            ]
+        ):
+            ctrl = self.dai.CameraControl()
+            if self.manual_exposure is not None and self.manual_iso is not None:
+                ctrl.setManualExposure(self.manual_exposure, self.manual_iso)
+            if self.manual_focus is not None:
+                ctrl.setManualFocus(self.manual_focus)
+            if self.manual_white_balance is not None:
+                ctrl.setManualWhiteBalance(self.manual_white_balance)
+
+            control_queue = self.device.getInputQueue("control")
+            control_queue.send(ctrl)
+
+    def start(self) -> OakRgbCapture:
+        """
+        Start the capture thread.
+
+        Returns:
+            Self for method chaining.
+        """
+        self.thread.start()
+        return self
+
+    def update(self) -> None:
+        """
+        Main loop running in separate thread to continuously capture frames.
+
+        This method runs until stopped flag is set.
+        """
+        while not self.stopped:
+            try:
+                img_frame = self.output_queue.get()
+                if img_frame is None:
+                    continue
+
+                frame = img_frame.getCvFrame()
+
+                if self.transform:
+                    frame = self.transform(frame)
+
+                if self.queue.full():
+                    try:
+                        self.queue.get_nowait()
+                    except Exception:
+                        pass
+
+                self.queue.put(frame)
+
+            except Exception as e:
+                warnings.warn(f"Error in {self.name} update loop: {e!s}")
+                time.sleep(0.1)
+
+    def read(self) -> np.ndarray:
+        """
+        Read the next frame from the queue (blocking).
+
+        Returns:
+            The next frame as a numpy array.
+        """
+        return self.queue.get()
+
+    def running(self) -> bool:
+        """
+        Check if capture is still running or has frames available.
+
+        Returns:
+            True if there are frames available or capture is not stopped.
+        """
+        return self.more() or not self.stopped
+
+    def more(self) -> bool:
+        """
+        Check if there are frames available in the queue.
+
+        Waits up to 0.5 seconds for frames to become available.
+
+        Returns:
+            True if frames are available in the queue.
+        """
+        tries = 0
+        while self.queue.qsize() == 0 and not self.stopped and tries < 5:
+            time.sleep(0.1)
+            tries += 1
+        return self.queue.qsize() > 0
+
+    def stop(self) -> None:
+        """
+        Stop the capture and release resources.
+
+        Stops the capture thread and closes the device connection.
+        """
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join(timeout=5)
+        if self.device:
+            self.device.close()
+
+    def get_health(self) -> dict[str, bool | str | int]:
+        """
+        Get health status information about the capture.
+
+        Returns:
+            Dictionary containing:
+                - is_running: Whether capture is active
+                - is_device_connected: Whether device is connected
+                - device_mxid: Device MxId
+                - queue_size: Number of frames in queue
+        """
+        return {
+            "is_running": not self.stopped,
+            "is_device_connected": self.device is not None,
+            "device_mxid": self.device_info.get("mxid") if self.device_info else None,
+            "queue_size": self.queue.qsize(),
+        }
+
+    def get_device_info(self) -> dict[str, str]:
+        """
+        Get device information.
+
+        Returns:
+            Dictionary with device mxid, state, and protocol.
+        """
+        return self.device_info if self.device_info else {}
+
+    def is_alive(self) -> bool:
+        """
+        Check if the capture is alive and functioning.
+
+        Returns:
+            True if not stopped and device is connected.
+        """
+        return not self.stopped and self.device is not None
+
+    def __enter__(self) -> OakRgbCapture:
+        """Context manager entry."""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.stop()
+
+
+class OakStereoCapture:
+    """
+    Threaded capture class for Luxonis OAK stereo cameras using DepthAI API v3.
+
+    This class captures multiple streams simultaneously from OAK stereo cameras
+    (OAK-D, OAK-D Lite, OAK-D Pro) including left/right mono cameras, depth,
+    disparity, and rectified views.
+
+    Attributes:
+        device_mxid: Device MxId (None for auto-detection)
+        output_streams: List of streams to capture
+        queues: Dict of thread-safe queues for each stream
+        stopped: Flag indicating if capture should stop
+        device_info: Information about the connected device
+
+    Examples:
+        ```python
+        import supervision as sv
+        import cv2
+
+        # Capture depth and disparity
+        capture = sv.OakStereoCapture(
+            output_streams=["depth", "disparity"]
+        ).start()
+
+        while capture.running():
+            frames = capture.read()  # Dict with "depth" and "disparity"
+            cv2.imshow("Depth", frames["depth"])
+            cv2.imshow("Disparity", frames["disparity"])
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        capture.stop()
+
+        # All streams with custom resolution
+        capture = sv.OakStereoCapture(
+            resolution="800p",
+            output_streams=["left", "right", "depth", "rectified_left",
+                            "rectified_right"],
+            extended_disparity=True,
+            subpixel=True
+        ).start()
+        ```
+    """
+
+    def __init__(
+        self,
+        device_mxid: str | None = None,
+        resolution: str = "400p",
+        output_streams: list[str] | None = None,
+        extended_disparity: bool = False,
+        subpixel: bool = False,
+        lr_check: bool = True,
+        median_filter: str = "KERNEL_7x7",
+        transform: Callable[[dict[str, np.ndarray]], dict[str, np.ndarray]]
+        | None = None,
+        queue_size: int = 128,
+        name: str = "OakStereoCapture",
+    ):
+        """
+        Initialize the OakStereoCapture.
+
+        Args:
+            device_mxid: Device MxId for specific device (None for auto-detection)
+            resolution: Mono camera resolution ("400p", "480p", "720p", "800p")
+            output_streams: List of streams to capture. Options:
+                - "left": Left mono camera
+                - "right": Right mono camera
+                - "depth": Depth map
+                - "disparity": Disparity map
+                - "rectified_left": Rectified left mono
+                - "rectified_right": Rectified right mono
+                Default: ["depth"]
+            extended_disparity: Enable extended disparity (closer depth range)
+            subpixel: Enable subpixel mode (better precision at distance)
+            lr_check: Enable left-right check (better occlusion handling)
+            median_filter: Median filter kernel size (KERNEL_3x3, KERNEL_5x5,
+                KERNEL_7x7)
+            transform: Optional function to transform frames dict before queuing
+            queue_size: Maximum number of frame dicts to buffer in queue
+            name: Name for the capture instance
+        """
+        try:
+            import depthai as dai
+        except ImportError:
+            raise ImportError(
+                "depthai is required for OAK camera support. "
+                "Install it with: pip install supervision[oak]"
+            )
+
+        self.dai = dai
+        self.device_mxid = device_mxid
+        self.resolution = resolution
+        self.output_streams = output_streams or ["depth"]
+        self.extended_disparity = extended_disparity
+        self.subpixel = subpixel
+        self.lr_check = lr_check
+        self.median_filter = median_filter
+        self.transform = transform
+        self.name = name
+        self.queue: Queue = Queue(maxsize=queue_size)
+        self.stopped = False
+        self.device = None
+        self.device_info = None
+        self.output_queues = {}
+
+        valid_streams = [
+            "left",
+            "right",
+            "depth",
+            "disparity",
+            "rectified_left",
+            "rectified_right",
+        ]
+        for stream in self.output_streams:
+            if stream not in valid_streams:
+                raise ValueError(
+                    f"Invalid output stream: {stream}. Valid options: {valid_streams}"
+                )
+
+        self._initialize_device()
+
+        self.thread = Thread(target=self.update, args=(), name=name)
+        self.thread.daemon = True
+
+    def _initialize_device(self) -> None:
+        """Initialize DepthAI device and pipeline."""
+        devices = self.dai.Device.getAllAvailableDevices()
+        if not devices:
+            raise OSError("No OAK devices found")
+
+        if self.device_mxid:
+            device_info = None
+            for dev in devices:
+                dev_id = dev.getMxId() if hasattr(dev, "getMxId") else dev.deviceId
+                if dev_id == self.device_mxid:
+                    device_info = dev
+                    break
+            if not device_info:
+                raise OSError(f"Device with MxId {self.device_mxid} not found")
+        else:
+            device_info = devices[0]
+
+        dev_id = (
+            device_info.getMxId()
+            if hasattr(device_info, "getMxId")
+            else device_info.deviceId
+        )
+        self.device_info = {
+            "mxid": dev_id,
+            "state": str(device_info.state),
+            "protocol": str(device_info.protocol),
+        }
+
+        pipeline = self.dai.Pipeline()
+
+        mono_left = pipeline.create(self.dai.node.MonoCamera)
+        mono_left.setCamera("left")
+        mono_right = pipeline.create(self.dai.node.MonoCamera)
+        mono_right.setCamera("right")
+
+        resolution_map = {
+            "400p": self.dai.MonoCameraProperties.SensorResolution.THE_400_P,
+            "480p": self.dai.MonoCameraProperties.SensorResolution.THE_480_P,
+            "720p": self.dai.MonoCameraProperties.SensorResolution.THE_720_P,
+            "800p": self.dai.MonoCameraProperties.SensorResolution.THE_800_P,
+        }
+        if self.resolution not in resolution_map:
+            raise ValueError(
+                f"Invalid resolution: {self.resolution}. "
+                f"Valid options: {list(resolution_map.keys())}"
+            )
+
+        mono_left.setResolution(resolution_map[self.resolution])
+        mono_right.setResolution(resolution_map[self.resolution])
+
+        stereo = pipeline.create(self.dai.node.StereoDepth)
+        stereo.setDefaultProfilePreset(
+            self.dai.node.StereoDepth.PresetMode.HIGH_DENSITY
+        )
+
+        stereo.setExtendedDisparity(self.extended_disparity)
+        stereo.setSubpixel(self.subpixel)
+        stereo.setLeftRightCheck(self.lr_check)
+
+        median_map = {
+            "KERNEL_3x3": self.dai.MedianFilter.KERNEL_3x3,
+            "KERNEL_5x5": self.dai.MedianFilter.KERNEL_5x5,
+            "KERNEL_7x7": self.dai.MedianFilter.KERNEL_7x7,
+        }
+        if self.median_filter in median_map:
+            stereo.initialConfig.setMedianFilter(median_map[self.median_filter])
+
+        mono_left.out.link(stereo.left)
+        mono_right.out.link(stereo.right)
+
+        for stream in self.output_streams:
+            xout = pipeline.create(self.dai.node.XLinkOut)
+            xout.setStreamName(stream)
+
+            if stream == "left":
+                mono_left.out.link(xout.input)
+            elif stream == "right":
+                mono_right.out.link(xout.input)
+            elif stream == "depth":
+                stereo.depth.link(xout.input)
+            elif stream == "disparity":
+                stereo.disparity.link(xout.input)
+            elif stream == "rectified_left":
+                stereo.rectifiedLeft.link(xout.input)
+            elif stream == "rectified_right":
+                stereo.rectifiedRight.link(xout.input)
+
+        self.device = self.dai.Device(pipeline, device_info)
+
+        for stream in self.output_streams:
+            self.output_queues[stream] = self.device.getOutputQueue(
+                stream, maxSize=4, blocking=False
+            )
+
+    def start(self) -> OakStereoCapture:
+        """
+        Start the capture thread.
+
+        Returns:
+            Self for method chaining.
+        """
+        self.thread.start()
+        return self
+
+    def update(self) -> None:
+        """
+        Main loop running in separate thread to continuously capture frames.
+
+        This method runs until stopped flag is set.
+        """
+        while not self.stopped:
+            try:
+                frames = {}
+                all_available = True
+
+                for stream, queue in self.output_queues.items():
+                    img_frame = queue.tryGet()
+                    if img_frame is None:
+                        all_available = False
+                        break
+
+                    frame = img_frame.getCvFrame()
+                    frames[stream] = frame
+
+                if not all_available:
+                    time.sleep(0.001)
+                    continue
+
+                if self.transform:
+                    frames = self.transform(frames)
+
+                if self.queue.full():
+                    try:
+                        self.queue.get_nowait()
+                    except Exception:
+                        pass
+
+                self.queue.put(frames)
+
+            except Exception as e:
+                warnings.warn(f"Error in {self.name} update loop: {e!s}")
+                time.sleep(0.1)
+
+    def read(self) -> dict[str, np.ndarray]:
+        """
+        Read the next frame dict from the queue (blocking).
+
+        Returns:
+            Dictionary mapping stream names to frames as numpy arrays.
+        """
+        return self.queue.get()
+
+    def running(self) -> bool:
+        """
+        Check if capture is still running or has frames available.
+
+        Returns:
+            True if there are frames available or capture is not stopped.
+        """
+        return self.more() or not self.stopped
+
+    def more(self) -> bool:
+        """
+        Check if there are frames available in the queue.
+
+        Waits up to 0.5 seconds for frames to become available.
+
+        Returns:
+            True if frames are available in the queue.
+        """
+        tries = 0
+        while self.queue.qsize() == 0 and not self.stopped and tries < 5:
+            time.sleep(0.1)
+            tries += 1
+        return self.queue.qsize() > 0
+
+    def stop(self) -> None:
+        """
+        Stop the capture and release resources.
+
+        Stops the capture thread and closes the device connection.
+        """
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join(timeout=5)
+        if self.device:
+            self.device.close()
+
+    def get_health(self) -> dict[str, bool | str | int]:
+        """
+        Get health status information about the capture.
+
+        Returns:
+            Dictionary containing health status.
+        """
+        return {
+            "is_running": not self.stopped,
+            "is_device_connected": self.device is not None,
+            "device_mxid": self.device_info.get("mxid") if self.device_info else None,
+            "queue_size": self.queue.qsize(),
+            "active_streams": self.output_streams,
+        }
+
+    def get_device_info(self) -> dict[str, str]:
+        """
+        Get device information.
+
+        Returns:
+            Dictionary with device mxid, state, and protocol.
+        """
+        return self.device_info if self.device_info else {}
+
+    def is_alive(self) -> bool:
+        """
+        Check if the capture is alive and functioning.
+
+        Returns:
+            True if not stopped and device is connected.
+        """
+        return not self.stopped and self.device is not None
+
+    def __enter__(self) -> OakStereoCapture:
+        """Context manager entry."""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.stop()
+
+
+class OakRgbDepthCapture:
+    """
+    Threaded capture class for Luxonis OAK cameras with aligned RGB + Depth.
+
+    This class captures aligned RGB and depth streams from OAK-D cameras,
+    providing the common use case of color image with corresponding depth map.
+
+    Attributes:
+        device_mxid: Device MxId (None for auto-detection)
+        queue: Thread-safe queue containing RGB and depth frames
+        stopped: Flag indicating if capture should stop
+        device_info: Information about the connected device
+
+    Examples:
+        ```python
+        import supervision as sv
+        import cv2
+
+        # Basic usage
+        capture = sv.OakRgbDepthCapture().start()
+
+        while capture.running():
+            rgb, depth = capture.read()
+            cv2.imshow("RGB", rgb)
+            cv2.imshow("Depth", depth)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        capture.stop()
+
+        # With custom settings
+        capture = sv.OakRgbDepthCapture(
+            rgb_width=1920,
+            rgb_height=1080,
+            depth_resolution="800p",
+            fps=30
+        ).start()
+        ```
+    """
+
+    def __init__(
+        self,
+        device_mxid: str | None = None,
+        rgb_width: int = 1920,
+        rgb_height: int = 1080,
+        depth_resolution: str = "400p",
+        fps: int = 30,
+        color_order: str = "BGR",
+        extended_disparity: bool = False,
+        subpixel: bool = False,
+        lr_check: bool = True,
+        align_to_rgb: bool = True,
+        manual_exposure: int | None = None,
+        manual_iso: int | None = None,
+        manual_focus: int | None = None,
+        manual_white_balance: int | None = None,
+        transform: Callable[
+            [tuple[np.ndarray, np.ndarray]], tuple[np.ndarray, np.ndarray]
+        ]
+        | None = None,
+        queue_size: int = 128,
+        name: str = "OakRgbDepthCapture",
+    ):
+        """
+        Initialize the OakRgbDepthCapture.
+
+        Args:
+            device_mxid: Device MxId for specific device (None for auto-detection)
+            rgb_width: RGB frame width (max 3840)
+            rgb_height: RGB frame height (max 2160)
+            depth_resolution: Depth resolution ("400p", "480p", "720p", "800p")
+            fps: Frames per second
+            color_order: Color order "RGB" or "BGR"
+            extended_disparity: Enable extended disparity for closer depth
+            subpixel: Enable subpixel mode for better precision
+            lr_check: Enable left-right check
+            align_to_rgb: Align depth to RGB perspective (True recommended)
+            manual_exposure: Manual exposure in microseconds (None for auto)
+            manual_iso: Manual ISO (None for auto)
+            manual_focus: Manual focus (None for auto)
+            manual_white_balance: Manual white balance in Kelvin (None for auto)
+            transform: Optional function to transform (rgb, depth) tuple
+            queue_size: Maximum number of frame pairs to buffer
+            name: Name for the capture instance
+        """
+        try:
+            import depthai as dai
+        except ImportError:
+            raise ImportError(
+                "depthai is required for OAK camera support. "
+                "Install it with: pip install supervision[oak]"
+            )
+
+        self.dai = dai
+        self.device_mxid = device_mxid
+        self.rgb_width = rgb_width
+        self.rgb_height = rgb_height
+        self.depth_resolution = depth_resolution
+        self.fps = fps
+        self.color_order = color_order
+        self.extended_disparity = extended_disparity
+        self.subpixel = subpixel
+        self.lr_check = lr_check
+        self.align_to_rgb = align_to_rgb
+        self.manual_exposure = manual_exposure
+        self.manual_iso = manual_iso
+        self.manual_focus = manual_focus
+        self.manual_white_balance = manual_white_balance
+        self.transform = transform
+        self.name = name
+        self.queue: Queue = Queue(maxsize=queue_size)
+        self.stopped = False
+        self.device = None
+        self.device_info = None
+
+        self._initialize_device()
+
+        self.thread = Thread(target=self.update, args=(), name=name)
+        self.thread.daemon = True
+
+    def _initialize_device(self) -> None:
+        """Initialize DepthAI device and pipeline."""
+        devices = self.dai.Device.getAllAvailableDevices()
+        if not devices:
+            raise OSError("No OAK devices found")
+
+        if self.device_mxid:
+            device_info = None
+            for dev in devices:
+                dev_id = dev.getMxId() if hasattr(dev, "getMxId") else dev.deviceId
+                if dev_id == self.device_mxid:
+                    device_info = dev
+                    break
+            if not device_info:
+                raise OSError(f"Device with MxId {self.device_mxid} not found")
+        else:
+            device_info = devices[0]
+
+        dev_id = (
+            device_info.getMxId()
+            if hasattr(device_info, "getMxId")
+            else device_info.deviceId
+        )
+        self.device_info = {
+            "mxid": dev_id,
+            "state": str(device_info.state),
+            "protocol": str(device_info.protocol),
+        }
+
+        pipeline = self.dai.Pipeline()
+
+        cam_rgb = pipeline.create(self.dai.node.ColorCamera)
+        cam_rgb.setPreviewSize(self.rgb_width, self.rgb_height)
+        cam_rgb.setFps(self.fps)
+
+        if self.color_order == "BGR":
+            cam_rgb.setColorOrder(self.dai.ColorCameraProperties.ColorOrder.BGR)
+        else:
+            cam_rgb.setColorOrder(self.dai.ColorCameraProperties.ColorOrder.RGB)
+
+        mono_left = pipeline.create(self.dai.node.MonoCamera)
+        mono_left.setCamera("left")
+        mono_right = pipeline.create(self.dai.node.MonoCamera)
+        mono_right.setCamera("right")
+
+        resolution_map = {
+            "400p": self.dai.MonoCameraProperties.SensorResolution.THE_400_P,
+            "480p": self.dai.MonoCameraProperties.SensorResolution.THE_480_P,
+            "720p": self.dai.MonoCameraProperties.SensorResolution.THE_720_P,
+            "800p": self.dai.MonoCameraProperties.SensorResolution.THE_800_P,
+        }
+        mono_left.setResolution(
+            resolution_map.get(self.depth_resolution, resolution_map["400p"])
+        )
+        mono_right.setResolution(
+            resolution_map.get(self.depth_resolution, resolution_map["400p"])
+        )
+
+        stereo = pipeline.create(self.dai.node.StereoDepth)
+        stereo.setDefaultProfilePreset(
+            self.dai.node.StereoDepth.PresetMode.HIGH_DENSITY
+        )
+        stereo.setExtendedDisparity(self.extended_disparity)
+        stereo.setSubpixel(self.subpixel)
+        stereo.setLeftRightCheck(self.lr_check)
+
+        if self.align_to_rgb:
+            stereo.setDepthAlign(self.dai.CameraBoardSocket.CAM_A)
+
+        mono_left.out.link(stereo.left)
+        mono_right.out.link(stereo.right)
+
+        xout_rgb = pipeline.create(self.dai.node.XLinkOut)
+        xout_rgb.setStreamName("rgb")
+        cam_rgb.preview.link(xout_rgb.input)
+
+        xout_depth = pipeline.create(self.dai.node.XLinkOut)
+        xout_depth.setStreamName("depth")
+        stereo.depth.link(xout_depth.input)
+
+        if any(
+            [
+                self.manual_exposure is not None,
+                self.manual_iso is not None,
+                self.manual_focus is not None,
+                self.manual_white_balance is not None,
+            ]
+        ):
+            control_in = pipeline.create(self.dai.node.XLinkIn)
+            control_in.setStreamName("control")
+            control_in.out.link(cam_rgb.inputControl)
+
+        self.device = self.dai.Device(pipeline, device_info)
+        self.rgb_queue = self.device.getOutputQueue("rgb", maxSize=4, blocking=False)
+        self.depth_queue = self.device.getOutputQueue(
+            "depth", maxSize=4, blocking=False
+        )
+
+        if any(
+            [
+                self.manual_exposure is not None,
+                self.manual_iso is not None,
+                self.manual_focus is not None,
+                self.manual_white_balance is not None,
+            ]
+        ):
+            ctrl = self.dai.CameraControl()
+            if self.manual_exposure is not None and self.manual_iso is not None:
+                ctrl.setManualExposure(self.manual_exposure, self.manual_iso)
+            if self.manual_focus is not None:
+                ctrl.setManualFocus(self.manual_focus)
+            if self.manual_white_balance is not None:
+                ctrl.setManualWhiteBalance(self.manual_white_balance)
+
+            control_queue = self.device.getInputQueue("control")
+            control_queue.send(ctrl)
+
+    def start(self) -> OakRgbDepthCapture:
+        """Start the capture thread."""
+        self.thread.start()
+        return self
+
+    def update(self) -> None:
+        """Main loop to continuously capture RGB and depth frames."""
+        while not self.stopped:
+            try:
+                rgb_frame = self.rgb_queue.tryGet()
+                depth_frame = self.depth_queue.tryGet()
+
+                if rgb_frame is None or depth_frame is None:
+                    time.sleep(0.001)
+                    continue
+
+                rgb = rgb_frame.getCvFrame()
+                depth = depth_frame.getCvFrame()
+
+                if self.transform:
+                    rgb, depth = self.transform((rgb, depth))
+
+                if self.queue.full():
+                    try:
+                        self.queue.get_nowait()
+                    except Exception:
+                        pass
+
+                self.queue.put((rgb, depth))
+
+            except Exception as e:
+                warnings.warn(f"Error in {self.name} update loop: {e!s}")
+                time.sleep(0.1)
+
+    def read(self) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Read the next RGB and depth frame pair (blocking).
+
+        Returns:
+            Tuple of (rgb_frame, depth_frame) as numpy arrays.
+        """
+        return self.queue.get()
+
+    def running(self) -> bool:
+        """Check if capture is still running."""
+        return self.more() or not self.stopped
+
+    def more(self) -> bool:
+        """Check if frames are available."""
+        tries = 0
+        while self.queue.qsize() == 0 and not self.stopped and tries < 5:
+            time.sleep(0.1)
+            tries += 1
+        return self.queue.qsize() > 0
+
+    def stop(self) -> None:
+        """Stop capture and release resources."""
+        self.stopped = True
+        if self.thread.is_alive():
+            self.thread.join(timeout=5)
+        if self.device:
+            self.device.close()
+
+    def get_health(self) -> dict[str, bool | str | int]:
+        """Get health status."""
+        return {
+            "is_running": not self.stopped,
+            "is_device_connected": self.device is not None,
+            "device_mxid": self.device_info.get("mxid") if self.device_info else None,
+            "queue_size": self.queue.qsize(),
+        }
+
+    def get_device_info(self) -> dict[str, str]:
+        """Get device information."""
+        return self.device_info if self.device_info else {}
+
+    def is_alive(self) -> bool:
+        """Check if capture is alive."""
+        return not self.stopped and self.device is not None
+
+    def __enter__(self) -> OakRgbDepthCapture:
+        """Context manager entry."""
+        self.start()
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Context manager exit."""
+        self.stop()

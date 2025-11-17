@@ -58,6 +58,9 @@ Documentation = "https://supervision.roboflow.com/latest/"
 metrics = [
     "pandas>=2.0.0",
 ]
+oak = [
+    "depthai>=2.20.0,<3.0.0",
+]
 
 [dependency-groups]
 dev = [

@@ -12,6 +12,9 @@ from supervision.pipeline.sinks import (
 )
 from supervision.pipeline.sources import (
     FrameGeneratorSource,
+    OakRgbDepthSource,
+    OakRgbSource,
+    OakStereoSource,
     StreamSource,
     VideoFileSource,
     WebcamSource,
@@ -73,6 +76,9 @@ __all__ = [
     "LineZoneAnnotatorStep",
     "LineZoneStep",
     "MultiSink",
+    "OakRgbDepthSource",
+    "OakRgbSource",
+    "OakStereoSource",
     # Core
     "Pipeline",
     "PipelineSink",
@@ -80,9 +86,9 @@ __all__ = [
     "PipelineStep",
     "PoolDetectorStep",
     "PoolYOLODetectionStep",
-    "ResizeStep",
     "ROIExtractionStep",
     "ROIVisualizationStep",
+    "ResizeStep",
     "SORTTrackerStep",
     "StreamSource",
     "TraceAnnotatorStep",
