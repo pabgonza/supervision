@@ -6,6 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Supervision is a Python computer vision library that provides reusable utilities for object detection, tracking, annotation, and dataset management. It's designed to be model-agnostic and work with popular ML frameworks like Ultralytics YOLO, Transformers, and MMDetection.
 
+**This is a fork**: `origin` is `pabgonza/supervision`, `upstream` is `roboflow/supervision`.
+Work here targets PRs to upstream, which is why commits follow their conventions and PRs go
+to `develop`. Sync with `git fetch upstream && git merge upstream/develop` on a
+`feat/upstream-sync-<version>` branch (last: 0.27.0).
+
 ## Development Commands
 
 **IMPORTANT:** Always use the `supervision_dev` conda environment for all commands and tests:
