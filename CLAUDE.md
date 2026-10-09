@@ -11,17 +11,21 @@ Work here targets PRs to upstream, which is why commits follow their conventions
 to `develop`. Sync with `git fetch upstream && git merge upstream/develop` on a
 `feat/upstream-sync-<version>` branch (last: 0.27.0).
 
+## Change workflow (OpenSpec)
+
+Non-trivial work goes through `openspec/changes/<change-id>/` in THIS repo (initialized 2026-09-15; planning artifacts in Spanish, code and commits in English following upstream). Run `openspec` commands from this directory, not from a consumer's checkout. `openspec list` shows the active changes; the first one was `serialize-stream-capture-reconnect` (`StreamCapture` reconnects from two threads over the same `cv2.VideoCapture`, SIGSEGV on a silent RTSP stream). Consumers install the fork with pip from `develop` HEAD: a fix here reaches Ball Counter v2 only after rebuilding its detector image.
+
 ## Development Commands
 
-**IMPORTANT:** Always use the `supervision_dev` conda environment for all commands and tests:
-```bash
-conda run -n supervision_dev <command>
+Run commands and tests with the `supervision_dev` env's Python directly (conda is not on PATH; numpy there has no MKL):
+```powershell
+& "C:\Users\pabgo\miniforge3\envs\supervision_dev\python.exe" -m <module> ...   # e.g. -m pytest, -m ruff
 ```
 
 ### Environment Setup
 ```bash
 # Install in development mode with all dependencies
-pip install -e ".[dev,docs,build]"
+pip install -e . --group dev --group docs --group build   # pip >= 25.1
 
 # Install pre-commit hooks
 pre-commit install
@@ -39,14 +43,8 @@ pre-commit run --all-files
 # Run tests
 pytest
 
-# Run tests with coverage
-pytest --cov=supervision
-
 # Run specific test module
 pytest test/detection/test_core.py
-
-# Run tests in parallel
-pytest -n auto
 ```
 
 ### Documentation
@@ -89,12 +87,6 @@ twine check dist/*
 - **LineZone/PolygonZone**: Geometric zones for counting and tracking objects
 - **Dataset classes**: Unified interface for different annotation formats
 
-### Design Patterns
-- Model-agnostic design with format converters for popular frameworks
-- Composable annotators that can be chained
-- Numpy-based operations for performance
-- Consistent API patterns across components
-
 ## Testing
 
 Tests are organized in the `test/` directory mirroring the main package structure. Use pytest for running tests:
@@ -125,15 +117,6 @@ The repository uses pre-commit hooks for code quality:
 - Ruff linting and formatting
 - Bandit security checks
 - Codespell for typo detection
-
-## Development Workflow
-
-1. Create feature branch with conventional naming (`feat/`, `fix/`, `docs/`, etc.)
-2. Make changes following code style guidelines
-3. Add tests for new functionality
-4. Ensure all pre-commit hooks pass
-5. Create PR with conventional commit messages
-6. PR targets `develop` branch (not `main`)
 
 ## Commit Guidelines
 
