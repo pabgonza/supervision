@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 from supervision.detection.core import Detections
@@ -33,6 +35,14 @@ class ByteTrack:
             be tracked before it is considered a 'valid' track.
             Increasing minimum_consecutive_frames prevents the creation of accidental tracks from
             false detection or double detection, but risks missing shorter tracks.
+        velocity_prior_alpha (float | None): Enables a velocity prior for scenes
+            where objects move coherently (conveyors, one-way traffic) and fast
+            relative to their size. New tracks start with the exponential moving
+            average, with this alpha, of the velocity of confirmed tracks instead
+            of zero, and unconfirmed tracks are predicted before association;
+            otherwise an object that moves more than about half its box per frame
+            never gets confirmed. Must be in (0, 1]; 0.1 is a good start.
+            None (default) disables it and keeps the original behavior.
     """  # noqa: E501 // docs
 
     def __init__(
@@ -42,7 +52,15 @@ class ByteTrack:
         minimum_matching_threshold: float = 0.8,
         frame_rate: int = 30,
         minimum_consecutive_frames: int = 1,
+        velocity_prior_alpha: float | None = None,
     ):
+        if velocity_prior_alpha is not None and not 0 < velocity_prior_alpha <= 1:
+            raise ValueError(
+                f"velocity_prior_alpha must be in (0, 1] or None, "
+                f"got {velocity_prior_alpha}"
+            )
+        self.velocity_prior_alpha = velocity_prior_alpha
+        self.velocity_prior = np.zeros(2)
         self.track_activation_threshold = track_activation_threshold
         self.minimum_matching_threshold = minimum_matching_threshold
 
@@ -142,6 +160,7 @@ class ByteTrack:
         ensuring the tracker starts with a clean state for each new video.
         """
         self.frame_id = 0
+        self.velocity_prior = np.zeros(2)
         self.internal_id_counter.reset()
         self.external_id_counter.reset()
         self.tracked_tracks = []
@@ -267,6 +286,8 @@ class ByteTrack:
                 lost_stracks.append(track)
 
         """Deal with unconfirmed tracks, usually tracks with only one beginning frame"""
+        if self.velocity_prior_alpha is not None:
+            STrack.multi_predict(unconfirmed, self.shared_kalman)
         detections = [detections[i] for i in u_detection]
         dists = matching.iou_distance(unconfirmed, detections)
 
@@ -287,7 +308,8 @@ class ByteTrack:
             track = detections[inew]
             if track.score < self.det_thresh:
                 continue
-            track.activate(self.kalman_filter, self.frame_id)
+            # velocity_prior stays at 0 while the prior is disabled
+            track.activate(self.kalman_filter, self.frame_id, self.velocity_prior)
             activated_starcks.append(track)
         """ Step 5: Update state"""
         for track in self.lost_tracks:
@@ -308,6 +330,16 @@ class ByteTrack:
             self.tracked_tracks, self.lost_tracks
         )
         output_stracks = [track for track in self.tracked_tracks if track.is_activated]
+
+        if self.velocity_prior_alpha is not None:
+            # Only tracks with some history: a fresh Kalman velocity drags toward 0
+            velocities = [t.mean[4:6] for t in output_stracks if t.tracklet_len >= 3]
+            if velocities:
+                self.velocity_prior = (
+                    1 - self.velocity_prior_alpha
+                ) * self.velocity_prior + self.velocity_prior_alpha * np.mean(
+                    velocities, axis=0
+                )
 
         return output_stracks
 

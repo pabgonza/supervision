@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 import scipy.linalg
 
@@ -28,21 +30,28 @@ class KalmanFilter:
         self._std_weight_position = 1.0 / 20
         self._std_weight_velocity = 1.0 / 160
 
-    def initiate(self, measurement: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def initiate(
+        self, measurement: np.ndarray, velocity: np.ndarray | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """
         Create track from an unassociated measurement.
 
         Args:
             measurement (ndarray): Bounding box coordinates (x, y, a, h) with
                 center position (x, y), aspect ratio a, and height h.
+            velocity (ndarray, optional): Initial center velocity (vx, vy) in
+                pixels per frame. Defaults to 0.
 
         Returns:
             Tuple[ndarray, ndarray]: Returns the mean vector (8 dimensional) and
                 covariance matrix (8x8 dimensional) of the new track.
-                Unobserved velocities are initialized to 0 mean.
+                Unobserved velocities are initialized to 0 mean, except the
+                center velocity when `velocity` is given.
         """
         mean_pos = measurement
         mean_vel = np.zeros_like(mean_pos)
+        if velocity is not None:
+            mean_vel[:2] = velocity
         mean = np.r_[mean_pos, mean_vel]
 
         std = [

@@ -73,12 +73,17 @@ class STrack:
                 stracks[i].mean = mean
                 stracks[i].covariance = cov
 
-    def activate(self, kalman_filter: KalmanFilter, frame_id: int) -> None:
-        """Start a new tracklet"""
+    def activate(
+        self,
+        kalman_filter: KalmanFilter,
+        frame_id: int,
+        velocity: npt.NDArray[np.float64] | None = None,
+    ) -> None:
+        """Start a new tracklet, optionally with an initial center velocity"""
         self.kalman_filter = kalman_filter
         self.internal_track_id = self.internal_id_counter.new_id()
         self.mean, self.covariance = self.kalman_filter.initiate(
-            self.tlwh_to_xyah(self._tlwh)
+            self.tlwh_to_xyah(self._tlwh), velocity
         )
 
         self.tracklet_len = 0

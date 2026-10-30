@@ -60,6 +60,7 @@ class ByteTrackerStep:
         minimum_consecutive_frames: int = 1,
         detections_key: str = "detections",
         metrics_key: str = "tracker_metrics",
+        velocity_prior_alpha: float | None = None,
     ):
         """
         Initialize ByteTrack tracking step.
@@ -84,6 +85,8 @@ class ByteTrackerStep:
                 (default: 'detections')
             metrics_key: Key to store timing metrics in data dict
                 (default: 'tracker_metrics')
+            velocity_prior_alpha: Velocity prior for fast, coherently moving
+                objects, in (0, 1] (see `ByteTrack`). None (default) disables it.
         """
 
         self.detections_key = detections_key
@@ -94,6 +97,7 @@ class ByteTrackerStep:
             minimum_matching_threshold=minimum_matching_threshold,
             frame_rate=frame_rate,
             minimum_consecutive_frames=minimum_consecutive_frames,
+            velocity_prior_alpha=velocity_prior_alpha,
         )
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
