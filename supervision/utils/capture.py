@@ -597,6 +597,7 @@ class StreamCapture:
         self.max_reconnect_delay = max_reconnect_delay
         self.reconnect_attempts = 0
         self.total_reconnect_attempts = 0
+        self.dropped_frames = 0
         self.last_frame_time = time.time()
         self.cap = None
 
@@ -668,13 +669,6 @@ class StreamCapture:
                     self.reconnect()
                     continue
 
-                # Clear buffer to get latest frame (reduce latency)
-                if self.queue.full():
-                    try:
-                        self.queue.get_nowait()
-                    except Exception:
-                        pass
-
                 ret, frame = self.cap.read()
 
                 if not ret or frame is None:
@@ -696,6 +690,14 @@ class StreamCapture:
 
                 if self.transform:
                     frame = self.transform(frame)
+
+                # Drop the oldest frame only when a newer one arrives (reduce latency)
+                if self.queue.full():
+                    try:
+                        self.queue.get_nowait()
+                        self.dropped_frames += 1
+                    except Exception:
+                        pass
 
                 self.queue.put(frame)
 
@@ -824,6 +826,8 @@ class StreamCapture:
                 - reconnect_attempts: Current consecutive reconnection attempts
                 - total_reconnect_attempts: Total reconnection attempts since start
                 - queue_size: Number of frames in queue
+                - dropped_frames: Frames discarded because the queue was full
+                  (the consumer did not keep up) since the capture was created
         """
         return {
             "is_running": not self.stopped,
@@ -832,6 +836,7 @@ class StreamCapture:
             "reconnect_attempts": self.reconnect_attempts,
             "total_reconnect_attempts": self.total_reconnect_attempts,
             "queue_size": self.queue.qsize(),
+            "dropped_frames": self.dropped_frames,
         }
 
     def get(self, prop_id: int) -> float:
