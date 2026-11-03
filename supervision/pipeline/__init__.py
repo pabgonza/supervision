@@ -3,6 +3,7 @@ from supervision.pipeline.core import (
     PipelineSink,
     PipelineSource,
     PipelineStep,
+    ThreadBoundary,
 )
 from supervision.pipeline.sinks import (
     CallbackSink,
@@ -91,6 +92,7 @@ __all__ = [
     "ResizeStep",
     "SORTTrackerStep",
     "StreamSource",
+    "ThreadBoundary",
     "TraceAnnotatorStep",
     "TrackerAnnotatorStep",
     "TransformStep",
