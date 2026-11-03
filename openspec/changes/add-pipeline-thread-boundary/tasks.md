@@ -23,6 +23,8 @@
   comprobación de salida igual.
   Hecho el 2026-11-03 en la PC (video de 221 en 1080p sin ROI, modelo de bolas `.pt`, 1500 frames): 66,6 → 71,4 fps,
   mismos ids. En la PC la GPU sobra; la medición que cuenta es la de dos canales en el Orin NX (firmware 7.4.5).
+  Con `--output` (cajas, ids y trazas, conf 0.5): 45,7 → 64,6 fps (el anotado y la escritura se solapan con la
+  inferencia) y los dos `.mp4` idénticos byte a byte.
 
 ## Workflow follow-up
 
