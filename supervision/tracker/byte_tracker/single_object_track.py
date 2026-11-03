@@ -58,16 +58,14 @@ class STrack:
     @staticmethod
     def multi_predict(stracks: list[STrack], shared_kalman: KalmanFilter) -> None:
         if len(stracks) > 0:
-            multi_mean = []
-            multi_covariance = []
+            multi_mean = np.array([st.mean for st in stracks])
+            multi_covariance = np.array([st.covariance for st in stracks])
             for i, st in enumerate(stracks):
-                multi_mean.append(st.mean.copy())
-                multi_covariance.append(st.covariance)
                 if st.state != TrackState.Tracked:
-                    multi_mean[i][7] = 0
+                    multi_mean[i, 7] = 0
 
             multi_mean, multi_covariance = shared_kalman.multi_predict(
-                np.asarray(multi_mean), np.asarray(multi_covariance)
+                multi_mean, multi_covariance
             )
             for i, (mean, cov) in enumerate(zip(multi_mean, multi_covariance)):
                 stracks[i].mean = mean
@@ -149,6 +147,21 @@ class STrack:
         """
         ret = self.tlwh.copy()
         ret[2:] += ret[:2]
+        return ret
+
+    @staticmethod
+    def multi_tlbr(stracks: list[STrack]) -> np.ndarray:
+        """`tlbr` of many tracks in one go, with the same arithmetic per element
+        (ByteTrack asks for ~100 boxes per frame with a dozen objects)."""
+        if all(st.mean is not None for st in stracks):
+            ret = np.array([st.mean[:4] for st in stracks]).reshape(-1, 4)
+            ret[:, 2] *= ret[:, 3]
+            ret[:, :2] -= ret[:, 2:] / 2
+        elif all(st.mean is None for st in stracks):
+            ret = np.array([st._tlwh for st in stracks]).reshape(-1, 4)
+        else:
+            return np.asarray([st.tlbr for st in stracks])
+        ret[:, 2:] += ret[:, :2]
         return ret
 
     @staticmethod

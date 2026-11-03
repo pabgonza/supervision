@@ -128,8 +128,8 @@ class ByteTrack:
         tracks = self.update_with_tensors(tensors=tensors)
 
         if len(tracks) > 0:
-            detection_bounding_boxes = np.asarray([det[:4] for det in tensors])
-            track_bounding_boxes = np.asarray([track.tlbr for track in tracks])
+            detection_bounding_boxes = tensors[:, :4]
+            track_bounding_boxes = STrack.multi_tlbr(tracks)
 
             ious = box_iou_batch(detection_bounding_boxes, track_bounding_boxes)
 

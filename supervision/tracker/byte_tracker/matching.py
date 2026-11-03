@@ -1,14 +1,10 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 from supervision.detection.utils.iou_and_nms import box_iou_batch
-
-if TYPE_CHECKING:
-    from supervision.tracker.byte_tracker.core import STrack
+from supervision.tracker.byte_tracker.single_object_track import STrack
 
 
 def indices_to_matches(
@@ -47,8 +43,8 @@ def iou_distance(atracks: list[STrack], btracks: list[STrack]) -> np.ndarray:
         atlbrs = atracks
         btlbrs = btracks
     else:
-        atlbrs = [track.tlbr for track in atracks]
-        btlbrs = [track.tlbr for track in btracks]
+        atlbrs = STrack.multi_tlbr(atracks)
+        btlbrs = STrack.multi_tlbr(btracks)
 
     _ious = np.zeros((len(atlbrs), len(btlbrs)), dtype=np.float32)
     if _ious.size != 0:

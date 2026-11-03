@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import numpy as np
-import scipy.linalg
+from scipy.linalg import LinAlgError
+from scipy.linalg.lapack import dpotrf, dpotrs
 
 
 class KalmanFilter:
@@ -128,11 +129,9 @@ class KalmanFilter:
         ]
         innovation_cov = np.diag(np.square(std))
 
-        mean = np.dot(self._update_mat, mean)
-        covariance = np.linalg.multi_dot(
-            (self._update_mat, covariance, self._update_mat.T)
-        )
-        return mean, covariance + innovation_cov
+        # _update_mat only selects (x, y, a, h): slicing gives the same values as
+        # the matrix products, without them
+        return mean[:4].copy(), covariance[:4, :4] + innovation_cov
 
     def multi_predict(
         self, mean: np.ndarray, covariance: np.ndarray
@@ -151,28 +150,22 @@ class KalmanFilter:
                 covariance matrix of the predicted state.
                 Unobserved velocities are initialized to 0 mean.
         """
-        std_pos = [
-            self._std_weight_position * mean[:, 3],
-            self._std_weight_position * mean[:, 3],
-            1e-2 * np.ones_like(mean[:, 3]),
-            self._std_weight_position * mean[:, 3],
-        ]
-        std_vel = [
-            self._std_weight_velocity * mean[:, 3],
-            self._std_weight_velocity * mean[:, 3],
-            1e-5 * np.ones_like(mean[:, 3]),
-            self._std_weight_velocity * mean[:, 3],
-        ]
-        sqr = np.square(np.r_[std_pos, std_vel]).T
+        std = np.empty((len(mean), 8))
+        std[:, [0, 1, 3]] = (self._std_weight_position * mean[:, 3])[:, None]
+        std[:, 2] = 1e-2
+        std[:, [4, 5, 7]] = (self._std_weight_velocity * mean[:, 3])[:, None]
+        std[:, 6] = 1e-5
 
-        motion_cov = []
-        for i in range(len(mean)):
-            motion_cov.append(np.diag(sqr[i]))
-        motion_cov = np.asarray(motion_cov)
-
-        mean = np.dot(mean, self._motion_mat.T)
-        left = np.dot(self._motion_mat, covariance).transpose((1, 0, 2))
-        covariance = np.dot(left, self._motion_mat.T) + motion_cov
+        # _motion_mat is the identity plus dt = 1 at (i, i + 4): multiplying by it
+        # only adds each velocity to its position. These sums are exactly the
+        # products mean @ F.T and F @ cov @ F.T (two non-zero terms per entry),
+        # without the (N, 8, 8) matrix products.
+        mean = mean.copy()
+        mean[:, :4] += mean[:, 4:]
+        covariance = covariance.copy()
+        covariance[:, :4, :] += covariance[:, 4:, :]
+        covariance[:, :, :4] += covariance[:, :, 4:]
+        covariance[:, np.arange(8), np.arange(8)] += np.square(std)
 
         return mean, covariance
 
@@ -195,18 +188,19 @@ class KalmanFilter:
         """
         projected_mean, projected_cov = self.project(mean, covariance)
 
-        chol_factor, lower = scipy.linalg.cho_factor(
-            projected_cov, lower=True, check_finite=False
-        )
-        kalman_gain = scipy.linalg.cho_solve(
-            (chol_factor, lower),
-            np.dot(covariance, self._update_mat.T).T,
-            check_finite=False,
-        ).T
+        # The LAPACK routines behind scipy.linalg.cho_factor/cho_solve, called
+        # directly: same results without the per-call checks, which cost more
+        # than the 4x4 solve. covariance[:, :4] == covariance @ _update_mat.T
+        chol_factor, info = dpotrf(projected_cov, lower=1, clean=0)
+        if info != 0:
+            raise LinAlgError(f"cholesky of the projected covariance failed: {info}")
+        kalman_gain, info = dpotrs(chol_factor, covariance[:, :4].T, lower=1)
+        kalman_gain = kalman_gain.T
         innovation = measurement - projected_mean
 
         new_mean = mean + np.dot(innovation, kalman_gain.T)
-        new_covariance = covariance - np.linalg.multi_dot(
-            (kalman_gain, projected_cov, kalman_gain.T)
+        # Same order np.linalg.multi_dot picks for these shapes: K @ (S @ K.T)
+        new_covariance = covariance - np.dot(
+            kalman_gain, np.dot(projected_cov, kalman_gain.T)
         )
         return new_mean, new_covariance
