@@ -6,14 +6,13 @@ With the boundary, the source and YOLO run in a worker thread one frame ahead
 of ByteTrack, which runs in the calling thread. The gain shows when inference
 (GPU) and tracking (CPU) take comparable time.
 
+The frame rate is always measured without annotations. --output adds two
+extra, untimed runs that write the annotated video (boxes, tracker ids,
+traces) for visual review: tracked_1thread.mp4 and tracked_2threads.mp4.
+
 Usage:
     python examples/pipeline/thread_boundary_demo.py --input video.mp4 \
-        --model yolov8n.pt --frames 1000
-
-    # Also write both runs annotated (boxes, tracker ids, traces):
-    # tracked_1thread.mp4 and tracked_2threads.mp4
-    python examples/pipeline/thread_boundary_demo.py --input video.mp4 \
-        --output tracked.mp4
+        --model yolov8n.pt --frames 1000 [--output tracked.mp4]
 """
 
 import argparse
@@ -23,15 +22,13 @@ from pathlib import Path
 import supervision as sv
 
 
-def run(args: argparse.Namespace, boundary: bool) -> tuple[float, list]:
+def run(args: argparse.Namespace, boundary: bool, output: str | None = None):
     yolo_step = sv.YOLODetectionStep(args.model, conf=args.conf, verbose=False)
     pipeline = sv.Pipeline(sv.VideoFileSource(args.input)) | yolo_step
     if boundary:
         pipeline = pipeline | sv.ThreadBoundary()
     pipeline = pipeline | sv.ByteTrackerStep()
-    if args.output:
-        out = Path(args.output)
-        suffix = "_2threads" if boundary else "_1thread"
+    if output:
         info = sv.VideoInfo.from_video_path(args.input)
         pipeline = (
             pipeline
@@ -42,10 +39,7 @@ def run(args: argparse.Namespace, boundary: bool) -> tuple[float, list]:
                 copy_frame=False,
             )
             | sv.VideoFileSink(
-                str(out.with_stem(out.stem + suffix)),
-                fps=info.fps,
-                width=info.width,
-                height=info.height,
+                output, fps=info.fps, width=info.width, height=info.height
             )
         )
 
@@ -63,7 +57,7 @@ def main() -> None:
     parser.add_argument("--model", default="yolov8n.pt", help="YOLO model")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence")
     parser.add_argument("--frames", type=int, default=1000, help="Frames to run")
-    parser.add_argument("--output", help="Annotated video path (both runs)")
+    parser.add_argument("--output", help="Also write both runs annotated")
     args = parser.parse_args()
 
     fps_one, ids_one = run(args, boundary=False)
@@ -71,6 +65,13 @@ def main() -> None:
     print(f"one thread:  {fps_one:6.1f} fps")
     print(f"two threads: {fps_two:6.1f} fps")
     print("same tracker ids:", ids_one == ids_two)
+
+    if args.output:
+        out = Path(args.output)
+        for boundary, suffix in ((False, "_1thread"), (True, "_2threads")):
+            path = str(out.with_stem(out.stem + suffix))
+            _, ids = run(args, boundary, output=path)
+            print(f"wrote {path} (same tracker ids: {ids == ids_one})")
 
 
 if __name__ == "__main__":
