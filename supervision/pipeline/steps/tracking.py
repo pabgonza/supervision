@@ -203,6 +203,7 @@ class LineZoneStep:
         minimum_crossing_threshold: int = 1,
         detections_key: str = "detections",
         line_zone_key: str = "line_zone",
+        forget_after_frames: int | None = None,
     ):
         """
         Initialize line zone counting step.
@@ -218,6 +219,10 @@ class LineZoneStep:
                 (default: 'detections')
             line_zone_key: Key to store LineZone object in data dict
                 (default: 'line_zone')
+            forget_after_frames: Forget the history of tracker ids absent for
+                more than this many frames to bound memory; use several times
+                the tracker's `max_time_lost`, see `LineZone` (default: None,
+                keep everything)
         """
         self.detections_key = detections_key
         self.line_zone_key = line_zone_key
@@ -226,6 +231,7 @@ class LineZoneStep:
             end=end,
             triggering_anchors=triggering_anchors,
             minimum_crossing_threshold=minimum_crossing_threshold,
+            forget_after_frames=forget_after_frames,
         )
 
     def process(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -269,6 +275,8 @@ class LineZoneStep:
         self.line_zone._in_count_per_class.clear()
         self.line_zone._out_count_per_class.clear()
         self.line_zone.crossing_state_history.clear()
+        self.line_zone._last_seen_frame.clear()
+        self.line_zone._frame_count = 0
 
 
 class SORTTrackerStep:

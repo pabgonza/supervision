@@ -4,7 +4,7 @@ from contextlib import ExitStack as DoesNotRaise
 
 import pytest
 
-from supervision import LineZone
+from supervision import Detections, LineZone
 from supervision.geometry.core import Point, Position, Vector
 from test.test_utils import mock_detections
 
@@ -850,3 +850,91 @@ def test_line_zone_crossing_ids():
     crossed_in, crossed_out = line_zone.trigger(empty_detections)
     assert len(line_zone.last_crossed_in_ids) == 0
     assert len(line_zone.last_crossed_out_ids) == 0
+
+
+ABOVE = [10, 4, 15, 8]
+BELOW = [10, -8, 15, -4]
+OUTSIDE = [200, 4, 205, 8]
+
+
+def _horizontal_zone(**kwargs) -> LineZone:
+    return LineZone(
+        start=Point(0, 0),
+        end=Point(100, 0),
+        triggering_anchors=[Position.CENTER],
+        **kwargs,
+    )
+
+
+def _trigger(line_zone: LineZone, boxes: dict[int, list[float]]) -> None:
+    if not boxes:
+        line_zone.trigger(Detections.empty())
+        return
+    line_zone.trigger(
+        mock_detections(xyxy=list(boxes.values()), tracker_id=list(boxes))
+    )
+
+
+@pytest.mark.parametrize("value", [0, -5, 1.5, True, "30"])
+def test_line_zone_forget_after_frames_invalid(value) -> None:
+    with pytest.raises(ValueError):
+        _horizontal_zone(forget_after_frames=value)
+
+
+def test_line_zone_forget_after_frames_none_matches_default() -> None:
+    sequence = (
+        [{1: ABOVE, 2: ABOVE}, {1: BELOW, 2: ABOVE}]
+        + [{2: ABOVE}] * 40
+        + [{}] * 40
+        + [{1: ABOVE, 2: BELOW}, {1: BELOW}]
+    )
+    zones = [_horizontal_zone(), _horizontal_zone(forget_after_frames=None)]
+    for boxes in sequence:
+        for line_zone in zones:
+            _trigger(line_zone, boxes)
+        assert zones[0].in_count == zones[1].in_count
+        assert zones[0].out_count == zones[1].out_count
+    assert zones[0].in_count == 3
+    assert zones[0].out_count == 1
+    assert {k: list(v) for k, v in zones[0].crossing_state_history.items()} == {
+        k: list(v) for k, v in zones[1].crossing_state_history.items()
+    }
+
+
+@pytest.mark.parametrize("warmup", [0, 29])
+def test_line_zone_forget_after_frames_reappears_within_window(warmup) -> None:
+    line_zone = _horizontal_zone(forget_after_frames=30)
+    for _ in range(warmup):
+        _trigger(line_zone, {})
+    _trigger(line_zone, {1: ABOVE})
+    for _ in range(30):
+        _trigger(line_zone, {})
+    _trigger(line_zone, {1: BELOW})
+    assert line_zone.in_count == 1
+
+
+def test_line_zone_forget_after_frames_forgets_absent_ids() -> None:
+    line_zone = _horizontal_zone(forget_after_frames=30)
+    _trigger(line_zone, {1: ABOVE})
+    assert 1 in line_zone.crossing_state_history
+    for _ in range(61):
+        _trigger(line_zone, {})
+    assert 1 not in line_zone.crossing_state_history
+
+
+def test_line_zone_forget_after_frames_bounded_history() -> None:
+    line_zone = _horizontal_zone(forget_after_frames=30)
+    largest = 0
+    for first in range(0, 100_000, 10):
+        _trigger(line_zone, {i: ABOVE for i in range(first, first + 10)})
+        largest = max(largest, len(line_zone.crossing_state_history))
+    assert largest <= 10 * (2 * 30 + 1)
+
+
+def test_line_zone_forget_after_frames_keeps_present_ids_out_of_limits() -> None:
+    line_zone = _horizontal_zone(forget_after_frames=30)
+    _trigger(line_zone, {1: ABOVE})
+    for _ in range(100):
+        _trigger(line_zone, {1: OUTSIDE})
+    _trigger(line_zone, {1: BELOW})
+    assert line_zone.in_count == 1

@@ -93,6 +93,7 @@ class LineZone:
             Position.BOTTOM_RIGHT,
         ),
         minimum_crossing_threshold: int = 1,
+        forget_after_frames: int | None = None,
     ):
         """
         Args:
@@ -108,7 +109,25 @@ class LineZone:
                 considered as having crossed the line. This is useful when
                 dealing with unstable bounding boxes or when detections
                 may linger on the line.
+            forget_after_frames (Optional[int]): If set, forget the crossing
+                history of a `tracker_id` absent from the detections for more
+                than this many `trigger` calls, so memory stays bounded when
+                the zone runs for days. Every call counts as one frame. Use
+                several times the tracker's `max_time_lost` (e.g.
+                `4 * ByteTrack.max_time_lost`): `update_with_detections` may
+                leave a live track out of its output for longer than
+                `max_time_lost`, and forgetting it then can miss its crossing.
+                `None` (default) keeps the history until reset.
         """
+        if forget_after_frames is not None and (
+            isinstance(forget_after_frames, bool)
+            or not isinstance(forget_after_frames, int)
+            or forget_after_frames < 1
+        ):
+            raise ValueError("forget_after_frames must be None or an integer >= 1.")
+        self.forget_after_frames = forget_after_frames
+        self._frame_count = 0
+        self._last_seen_frame: dict[int, int] = {}
         self.vector = Vector(start=start, end=end)
         self.limits = self._calculate_region_of_interest_limits(vector=self.vector)
         self.crossing_history_length = max(2, minimum_crossing_threshold + 1)
@@ -156,6 +175,22 @@ class LineZone:
         """
         crossed_in = np.full(len(detections), False)
         crossed_out = np.full(len(detections), False)
+
+        if self.forget_after_frames is not None:
+            self._frame_count += 1
+            if detections.tracker_id is not None:
+                self._last_seen_frame.update(
+                    dict.fromkeys(detections.tracker_id.tolist(), self._frame_count)
+                )
+            if self._frame_count % self.forget_after_frames == 0:
+                stale = [
+                    tracker_id
+                    for tracker_id, seen in self._last_seen_frame.items()
+                    if self._frame_count - seen > self.forget_after_frames
+                ]
+                for tracker_id in stale:
+                    del self._last_seen_frame[tracker_id]
+                    self.crossing_state_history.pop(tracker_id, None)
 
         if len(detections) == 0:
             self.last_crossed_in_ids = np.array([], dtype=int)

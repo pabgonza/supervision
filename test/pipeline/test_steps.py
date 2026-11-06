@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import supervision as sv
 
@@ -744,6 +745,39 @@ class TestLineZoneStep:
         # Counts should be cleared
         assert step.line_zone.in_count == 0
         assert step.line_zone.out_count == 0
+
+    def test_line_zone_step_forget_after_frames(self):
+        """LineZoneStep passes forget_after_frames and reset clears its state."""
+        step = sv.LineZoneStep(
+            start=sv.Point(x=0, y=100),
+            end=sv.Point(x=200, y=100),
+            forget_after_frames=30,
+        )
+        assert step.line_zone.forget_after_frames == 30
+
+        detections = sv.Detections(
+            xyxy=np.array([[50, 80, 70, 95]]),
+            class_id=np.array([0]),
+            tracker_id=np.array([1]),
+        )
+        step.process({"detections": detections})
+        assert step.line_zone.crossing_state_history
+        assert step.line_zone._last_seen_frame
+        assert step.line_zone._frame_count == 1
+
+        step.reset()
+        assert not step.line_zone.crossing_state_history
+        assert not step.line_zone._last_seen_frame
+        assert step.line_zone._frame_count == 0
+
+    def test_line_zone_step_forget_after_frames_invalid(self):
+        """LineZoneStep rejects an invalid forget_after_frames."""
+        with pytest.raises(ValueError):
+            sv.LineZoneStep(
+                start=sv.Point(x=0, y=100),
+                end=sv.Point(x=200, y=100),
+                forget_after_frames=0,
+            )
 
     def test_line_zone_step_stores_object_not_copies(self):
         """Test that LineZoneStep stores line_zone object, not individual properties."""
